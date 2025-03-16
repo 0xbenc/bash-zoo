@@ -13,7 +13,7 @@ sudo apt update
 
 # Install required packages
 echo "Installing xclip..."
-sudo apt install -y xclip
+sudo apt install -y xclip uuid-runtime
 
 # Verify installations
 echo "Verifying installations..."
