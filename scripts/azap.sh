@@ -1,12 +1,12 @@
 #!/bin/bash
 # Script: azap.sh
 # Description:
-#   This script lists folders one level down from the 'zapps' directory,
+#   This script lists folders one level down from the '$HOME/zapps' directory,
 #   assigns each a unique key (a, b, c, …), and waits for the user to input
 #   a key. When a valid key is entered, it runs the 'zapp.AppImage' found in that folder.
 
 # Set the directory containing the zapp folders
-ZAPPS_DIR="~/zapps"
+ZAPPS_DIR="$HOME/zapps"
 
 # Check if the zapps directory exists
 if [[ ! -d "$ZAPPS_DIR" ]]; then
