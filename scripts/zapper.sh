@@ -2,7 +2,7 @@
 # Script: zapper.sh
 # Description:
 #   This script takes an AppImage file as an argument, asks for a folder name,
-#   creates a dedicated folder under ~/zapps with that name, moves the AppImage
+#   creates a dedicated folder under $HOME/zapps with that name, moves the AppImage
 #   into that folder (renamed as "zapp.AppImage"), and sets it to be executable.
 #
 # Usage:
@@ -32,8 +32,8 @@ if [ -z "$folder_name" ]; then
     exit 1
 fi
 
-# Define the destination directory under ~/zapps.
-DEST_DIR=~/zapps/"$folder_name"
+# Define the destination directory under $HOME/zapps.
+DEST_DIR="$HOME/zapps/$folder_name"
 
 # Create the destination directory if it does not exist.
 mkdir -p "$DEST_DIR"
