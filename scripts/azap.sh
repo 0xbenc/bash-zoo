@@ -3,7 +3,12 @@
 # Description:
 #   This script lists folders one level down from the '$HOME/zapps' directory,
 #   assigns each a unique key (a, b, c, …), and waits for the user to input
-#   a key. When a valid key is entered, it runs the 'zapp.AppImage' found in that folder.
+#   a key. When a valid key is entered, it will:
+#     - Run the 'zapp.AppImage' if it exists in the selected folder, or
+#     - Search for executable files (in the folder or its single subdirectory) and run one.
+#
+# Usage:
+#   ./azap.sh
 
 # Set the directory containing the zapp folders
 ZAPPS_DIR="$HOME/zapps"
@@ -17,16 +22,14 @@ fi
 # Declare an associative array to map keys to folder paths.
 declare -A folder_map
 
-# Use an array of letters for unique keys.
+# Array of letters for unique keys.
 letters=( {a..z} )
 
 echo "Available zapps:"
-
 counter=0
 # Loop through each item one level down in ZAPPS_DIR.
 for folder in "$ZAPPS_DIR"/*; do
     if [[ -d "$folder" ]]; then
-        # Assign a unique letter from the letters array.
         key="${letters[$counter]}"
         folder_map["$key"]="$folder"
         folder_name=$(basename "$folder")
@@ -50,21 +53,60 @@ if [[ -z "${folder_map[$user_key]}" ]]; then
     exit 1
 fi
 
-# Retrieve the selected folder and determine the AppImage path.
+# Retrieve the selected folder.
 selected_folder="${folder_map[$user_key]}"
-APPIMAGE_PATH="$selected_folder/zapp.AppImage"
 
-# Check if the AppImage file exists and is executable.
-if [[ ! -f "$APPIMAGE_PATH" ]]; then
-    echo "File '$APPIMAGE_PATH' does not exist."
-    exit 1
+# First, check if there's a 'zapp.AppImage' file.
+if [[ -f "$selected_folder/zapp.AppImage" ]]; then
+    APPIMAGE_PATH="$selected_folder/zapp.AppImage"
+    if [[ ! -x "$APPIMAGE_PATH" ]]; then
+        echo "File '$APPIMAGE_PATH' is not executable."
+        exit 1
+    fi
+    echo "Running $(basename "$selected_folder") using zapp.AppImage..."
+    "$APPIMAGE_PATH"
+    exit 0
 fi
 
-if [[ ! -x "$APPIMAGE_PATH" ]]; then
-    echo "File '$APPIMAGE_PATH' is not executable."
-    exit 1
+# If no AppImage is found, attempt to find executables.
+# If the folder contains exactly one subdirectory, assume that is the actual app folder.
+subdirs=( "$selected_folder"/*/ )
+if [[ ${#subdirs[@]} -eq 1 ]]; then
+    search_dir="${subdirs[0]}"
+else
+    search_dir="$selected_folder"
 fi
 
-# Inform the user and execute the AppImage.
-echo "Running $(basename "$selected_folder")..."
-"$APPIMAGE_PATH"
+# Look for executable files (only regular files) in the chosen directory.
+mapfile -t executables < <(find "$search_dir" -maxdepth 1 -type f -executable)
+exe_count=${#executables[@]}
+
+if [[ $exe_count -eq 0 ]]; then
+    echo "No executable file found in '$search_dir'."
+    exit 1
+elif [[ $exe_count -eq 1 ]]; then
+    echo "Running $(basename "$search_dir") using $(basename "${executables[0]}")..."
+    "${executables[0]}"
+    exit 0
+else
+    # More than one executable found; prompt the user to select one.
+    declare -A exe_map
+    echo "Multiple executables found in '$search_dir'. Choose one:"
+    counter=0
+    for exe in "${executables[@]}"; do
+        key="${letters[$counter]}"
+        exe_map["$key"]="$exe"
+        exe_name=$(basename "$exe")
+        echo "  [$key] $exe_name"
+        ((counter++))
+    done
+    read -p "Enter the letter corresponding to the executable you want to run: " exe_choice
+    if [[ -z "${exe_map[$exe_choice]}" ]]; then
+        echo "Invalid selection. Exiting."
+        exit 1
+    fi
+    chosen_exe="${exe_map[$exe_choice]}"
+    echo "Running $(basename "$chosen_exe")..."
+    "$chosen_exe"
+    exit 0
+fi
