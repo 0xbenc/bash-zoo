@@ -1,17 +1,19 @@
 #!/bin/bash
 # Script: zapper.sh
 # Description:
-#   This script takes an AppImage or a .tar.xz file as an argument, asks for a folder name,
-#   creates a dedicated folder under $HOME/zapps with that name, moves the AppImage into that folder
-#   (renamed as "zapp.AppImage") and sets it to be executable, or extracts a .tar.xz archive into that folder.
+#   This script takes an AppImage, a .tar.xz file, or a .tar.gz file as an argument,
+#   asks for a folder name, creates a dedicated folder under $HOME/zapps with that name,
+#   moves the AppImage into that folder (renamed as "zapp.AppImage") and sets it to be executable,
+#   or extracts the archive into that folder.
 #
 # Usage:
 #   ./zapper.sh /path/to/Your-App.AppImage
 #   ./zapper.sh /path/to/Your-App.tar.xz
+#   ./zapper.sh /path/to/Your-App.tar.gz
 
 # Check if an argument is provided.
 if [ "$#" -ne 1 ]; then
-    echo "Usage: $0 /path/to/AppImage-or-tar.xz"
+    echo "Usage: $0 /path/to/AppImage-or-archive"
     exit 1
 fi
 
@@ -50,7 +52,11 @@ elif [[ "$APPFILE" == *.tar.xz ]]; then
     # Extract the tar.xz archive into the destination directory.
     tar -xf "$APPFILE" -C "$DEST_DIR"
     echo "tar.xz archive has been extracted in '$DEST_DIR'."
+elif [[ "$APPFILE" == *.tar.gz ]]; then
+    # Extract the tar.gz archive into the destination directory.
+    tar -xzf "$APPFILE" -C "$DEST_DIR"
+    echo "tar.gz archive has been extracted in '$DEST_DIR'."
 else
-    echo "Unsupported file type. Please provide an AppImage or a .tar.xz file."
+    echo "Unsupported file type. Please provide an AppImage, a .tar.xz, or a .tar.gz file."
     exit 1
 fi
