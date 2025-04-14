@@ -1,14 +1,16 @@
 #!/bin/bash
-# Script: azap.sh
+# Script: zapp.sh
 # Description:
 #   This script lists folders one level down from the '$HOME/zapps' directory,
 #   assigns each a unique key (a, b, c, …), and waits for the user to input
 #   a key. When a valid key is entered, it will:
 #     - Run the 'zapp.AppImage' if it exists in the selected folder, or
-#     - Search for executable files (in the folder or its single subdirectory) and run one.
+#     - If a 'zapp.md' file exists, use its stored relative executable path,
+#     - Otherwise, search for executable files (in the folder or its single subdirectory)
+#       and run one.
 #
 # Usage:
-#   ./azap.sh
+#   ./zapp.sh
 
 # Set the directory containing the zapp folders
 ZAPPS_DIR="$HOME/zapps"
@@ -55,6 +57,7 @@ fi
 
 # Retrieve the selected folder.
 selected_folder="${folder_map[$user_key]}"
+folder_basename=$(basename "$selected_folder")
 
 # First, check if there's a 'zapp.AppImage' file.
 if [[ -f "$selected_folder/zapp.AppImage" ]]; then
@@ -63,12 +66,30 @@ if [[ -f "$selected_folder/zapp.AppImage" ]]; then
         echo "File '$APPIMAGE_PATH' is not executable."
         exit 1
     fi
-    echo "Running $(basename "$selected_folder") using zapp.AppImage..."
+    echo "Running $folder_basename using zapp.AppImage..."
     "$APPIMAGE_PATH"
     exit 0
 fi
 
-# If no AppImage is found, attempt to find executables.
+# Next, check if a markdown file exists that registers the main executable.
+ZAPP_MD="$selected_folder/zapp.md"
+if [[ -f "$ZAPP_MD" ]]; then
+    # The file is expected to contain a relative path, e.g.:
+    # ./bin/main_executable
+    REL_PATH=$(head -n 1 "$ZAPP_MD" | tr -d '\r\n')
+    if [[ -n "$REL_PATH" ]]; then
+        MAIN_EXE="$selected_folder/$REL_PATH"
+        if [[ -x "$MAIN_EXE" ]]; then
+            echo "Running $folder_basename using registered main executable: $(basename "$MAIN_EXE")..."
+            "$MAIN_EXE"
+            exit 0
+        else
+            echo "The executable '$MAIN_EXE' (from zapp.md) is not found or not executable."
+        fi
+    fi
+fi
+
+# Fallback: If no AppImage or markdown file is found, attempt to find executables.
 # If the folder contains exactly one subdirectory, assume that is the actual app folder.
 subdirs=( "$selected_folder"/*/ )
 if [[ ${#subdirs[@]} -eq 1 ]]; then
