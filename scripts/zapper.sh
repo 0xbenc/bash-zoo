@@ -9,14 +9,13 @@
 #   If installing from an archive and multiple executables are found,
 #   the user is prompted to identify the "main program". The script then creates a
 #   markdown file (zapp.md) inside the new zapp folder storing the relative path to
-#   the main executable.
+#   the main executable and creates a .desktop entry in the application launcher.
 #
 # Usage:
 #   ./zapper.sh /path/to/Your-App.AppImage
 #   ./zapper.sh /path/to/Your-App.tar.xz
 #   ./zapper.sh /path/to/Your-App.tar.gz
 
-# Check if an argument is provided.
 if [ "$#" -ne 1 ]; then
     echo "Usage: $0 /path/to/AppImage-or-archive"
     exit 1
@@ -90,27 +89,31 @@ if [[ -n "$MAIN_EXE" ]]; then
     echo "$MAIN_EXE" > "$DEST_DIR/zapp.md"
     echo "Registered main executable: $MAIN_EXE"
 
-    # Create .desktop file
     DESKTOP_ENTRY_PATH="$HOME/.local/share/applications/zapp-$folder_name.desktop"
     mkdir -p "$(dirname "$DESKTOP_ENTRY_PATH")"
 
-    ICON_LINE=""
-    # Optional icon check
-    if [ -f "$DEST_DIR/icon.png" ]; then
-        ICON_LINE="Icon=$DEST_DIR/icon.png"
+    ABS_MAIN_EXE=$(realpath "$DEST_DIR/$MAIN_EXE")
+    ICON_PATH="$DEST_DIR/icon.png"
+    if [ -f "$ICON_PATH" ]; then
+        ICON_LINE="Icon=$(realpath "$ICON_PATH")"
+    else
+        ICON_LINE="Icon=utilities-terminal"
     fi
 
     cat > "$DESKTOP_ENTRY_PATH" <<EOF
 [Desktop Entry]
 Type=Application
 Name=$folder_name
-Exec=$DEST_DIR/$MAIN_EXE
+Comment=Installed with zapper.sh
+Exec=sh -c 'chmod +x "\$1" && exec "\$1" >> "\$HOME/.local/share/zapper-launch.log" 2>&1' sh "$ABS_MAIN_EXE"
 $ICON_LINE
 Terminal=false
 Categories=Utility;
+StartupNotify=true
 EOF
 
     chmod +x "$DESKTOP_ENTRY_PATH"
+    update-desktop-database ~/.local/share/applications/ &> /dev/null
     echo "Desktop entry created at: $DESKTOP_ENTRY_PATH"
     echo "You can now search for '$folder_name' in your app launcher."
 else
