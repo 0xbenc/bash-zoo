@@ -2,39 +2,24 @@
 # Script: share
 # Description:
 #   Share files, folders, or text using magic-wormhole.
-#   Adds clipboard, ASCII formatting, optional QR, and folder zipping support.
+#   Adds clipboard and folder zipping support.
 # Dependencies:
-#   magic-wormhole, xclip (optional), figlet (optional), qrencode (optional)
+#   magic-wormhole
 
 set -e
 
 print_usage() {
   echo "Usage:"
-  echo "  share <file|folder>       Share a file or folder (zips folder)"
-  echo "  share --text              Share custom text (prompts for input)"
-  echo "  share --clipboard         Share current clipboard contents as text"
-  echo "  share --receive           Receive a wormhole transfer"
+  echo "  share <file|folder>            Share a file or folder (zips folder)"
+  echo "  share --text | -t              Share custom text (prompts for input)"
+  echo "  share --clipboard | -c         Share current clipboard contents as text"
+  echo "  share --receive | -r           Receive a wormhole transfer (will prompt for code)"
+  echo "  share --receive <code>         Receive a wormhole using a specific code (e.g. '76-alkali-algol')"
   exit 1
 }
 
-show_code() {
-  CODE="$1"
-
-  if command -v figlet &>/dev/null; then
-    figlet "$CODE"
-  else
-    echo "Wormhole Code: $CODE"
-  fi
-
-  if command -v xclip &>/dev/null; then
-    echo -n "$CODE" | xclip -selection clipboard
-    echo "[✓] Code copied to clipboard"
-  fi
-
-  if command -v qrencode &>/dev/null; then
-    echo "[QR]"
-    echo "$CODE" | qrencode -t ansiutf8
-  fi
+extract_code() {
+  grep -oE '[0-9a-z]+(-[0-9a-z]+){2}$'
 }
 
 send_file() {
@@ -45,27 +30,22 @@ send_file() {
     echo "[*] Zipping folder: $INPUT"
     zip -r -q "$TMPZIP" "$INPUT"
     echo "[*] Sending ZIP: $(basename "$TMPZIP")"
-    CODE=$(wormhole send "$TMPZIP" 2>&1 | tee /dev/tty | grep -oE '[0-9a-z]+(-[0-9a-z]+){2}$')
+    CODE=$(wormhole send "$TMPZIP" 2>&1 | tee /dev/tty | extract_code)
     rm "$TMPZIP"
   elif [[ -f "$INPUT" ]]; then
     echo "[*] Sending file: $INPUT"
-    CODE=$(wormhole send "$INPUT" 2>&1 | tee /dev/tty | grep -oE '[0-9a-z]+(-[0-9a-z]+){2}$')
+    CODE=$(wormhole send "$INPUT" 2>&1 | tee /dev/tty | extract_code)
   else
     echo "Invalid file or directory: $INPUT"
     exit 1
   fi
-
-  echo
-  show_code "$CODE"
 }
 
 send_text() {
   echo "[*] Enter the text to send. Finish with Ctrl+D:"
   TEXT=$(</dev/stdin)
   echo "[*] Sending text..."
-  CODE=$(echo "$TEXT" | wormhole send 2>&1 | tee /dev/tty | grep -oE '[0-9a-z]+(-[0-9a-z]+){2}$')
-  echo
-  show_code "$CODE"
+  CODE=$(echo "$TEXT" | wormhole send 2>&1 | tee /dev/tty | extract_code)
 }
 
 send_clipboard() {
@@ -81,14 +61,18 @@ send_clipboard() {
   fi
 
   echo "[*] Sending clipboard contents..."
-  CODE=$(echo "$TEXT" | wormhole send 2>&1 | tee /dev/tty | grep -oE '[0-9a-z]+(-[0-9a-z]+){2}$')
-  echo
-  show_code "$CODE"
+  CODE=$(echo "$TEXT" | wormhole send 2>&1 | tee /dev/tty | extract_code)
 }
 
 receive_file() {
-  echo "[*] Ready to receive file..."
-  wormhole receive
+  if [[ -n "$1" ]]; then
+    echo "[*] Receiving with code: $1"
+    wormhole receive "$1"
+  else
+    echo "[*] Ready to receive file..."
+    echo "You can also run: share --receive <code> to skip this step."
+    wormhole receive
+  fi
 }
 
 ### ENTRYPOINT
@@ -98,14 +82,18 @@ if [[ $# -eq 0 ]]; then
 fi
 
 case "$1" in
-  --text)
+  --text|-t)
     send_text
     ;;
-  --clipboard)
+  --clipboard|-c)
     send_clipboard
     ;;
-  --receive)
-    receive_file
+  --receive|-r)
+    if [[ -n "$2" ]]; then
+      receive_file "$2"
+    else
+      receive_file
+    fi
     ;;
   -*)
     print_usage
