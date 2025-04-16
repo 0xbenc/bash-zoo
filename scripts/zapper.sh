@@ -1,20 +1,5 @@
 #!/bin/bash
 # Script: zapper.sh
-# Description:
-#   This script takes an AppImage, a .tar.xz file, or a .tar.gz file as an argument,
-#   asks for a folder name, creates a dedicated folder under $HOME/zapps with that name,
-#   moves the AppImage into that folder (renamed as "zapp.AppImage") and sets it to be executable,
-#   or extracts the archive into that folder.
-#
-#   If installing from an archive and multiple executables are found,
-#   the user is prompted to identify the "main program". The script then creates a
-#   markdown file (zapp.md) inside the new zapp folder storing the relative path to
-#   the main executable and creates a .desktop entry in the application launcher.
-#
-# Usage:
-#   ./zapper.sh /path/to/Your-App.AppImage
-#   ./zapper.sh /path/to/Your-App.tar.xz
-#   ./zapper.sh /path/to/Your-App.tar.gz
 
 if [ "$#" -ne 1 ]; then
     echo "Usage: $0 /path/to/AppImage-or-archive"
@@ -67,7 +52,7 @@ if [[ -z "$MAIN_EXE" ]]; then
     else
         echo "Multiple executables found:"
         declare -A exe_map
-        letters=( {a..z} )
+        letters=({a..z})
         counter=0
         for exe in "${exes[@]}"; do
             key="${letters[$counter]}"
@@ -85,6 +70,41 @@ if [[ -z "$MAIN_EXE" ]]; then
     fi
 fi
 
+# Icon selection logic adjusted to look one level down relative to main exec
+if [[ -n "$MAIN_EXE" ]]; then
+    MAIN_EXE_DIR=$(dirname "$DEST_DIR/$MAIN_EXE")
+    mapfile -t icons < <(find "$MAIN_EXE_DIR" -maxdepth 2 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.ico' -o -iname '*.icns' \))
+else
+    icons=()
+fi
+
+icon_count=${#icons[@]}
+
+if [[ $icon_count -eq 1 ]]; then
+    ICON_PATH=$(realpath "${icons[0]}")
+elif [[ $icon_count -gt 1 ]]; then
+    echo "Multiple icon/image files found:"
+    declare -A icon_map
+    letters=({a..z})
+    counter=0
+    for ico in "${icons[@]}"; do
+        key="${letters[$counter]}"
+        icon_map["$key"]="$ico"
+        ico_name=$(basename "$ico")
+        echo "  [$key] $ico_name"
+        ((counter++))
+    done
+    read -p "Enter the letter of the icon you want to use: " icon_choice
+    if [[ -n "${icon_map[$icon_choice]}" ]]; then
+        ICON_PATH=$(realpath "${icon_map[$icon_choice]}")
+    else
+        echo "Invalid selection. Defaulting to utilities-terminal."
+        ICON_PATH="utilities-terminal"
+    fi
+else
+    ICON_PATH="utilities-terminal"
+fi
+
 if [[ -n "$MAIN_EXE" ]]; then
     echo "$MAIN_EXE" > "$DEST_DIR/zapp.md"
     echo "Registered main executable: $MAIN_EXE"
@@ -93,20 +113,14 @@ if [[ -n "$MAIN_EXE" ]]; then
     mkdir -p "$(dirname "$DESKTOP_ENTRY_PATH")"
 
     ABS_MAIN_EXE=$(realpath "$DEST_DIR/$MAIN_EXE")
-    ICON_PATH="$DEST_DIR/icon.png"
-    if [ -f "$ICON_PATH" ]; then
-        ICON_LINE="Icon=$(realpath "$ICON_PATH")"
-    else
-        ICON_LINE="Icon=utilities-terminal"
-    fi
 
     cat > "$DESKTOP_ENTRY_PATH" <<EOF
 [Desktop Entry]
 Type=Application
 Name=$folder_name
-Comment=Installed with zapper.sh
+Comment=Installed with zapper
 Exec=sh -c 'chmod +x "\$1" && exec "\$1" >> "\$HOME/.local/share/zapper-launch.log" 2>&1' sh "$ABS_MAIN_EXE"
-$ICON_LINE
+Icon=$ICON_PATH
 Terminal=false
 Categories=Utility;
 StartupNotify=true
