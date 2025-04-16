@@ -55,11 +55,11 @@ To remove the aliases, open your shell configuration file (`~/.bashrc` or `~/.zs
 ## Contributors 👥🤝🌍
 
 - **Ben Chapman** ([0xbenc](https://github.com/0xbenc)) - Maintainer
-- **Ben Cully** ([BenCully](https://github.com/BenCully))
+- **Ben Cully** ([BenCully](https://github.com/BenCully)) - Contributor
 
 ## Models Used 🤖🧠⚡
 
-- **ChatGPT 4o**
+- **ChatGPT `4o`, `4.5`, `o3-mini`, and `o3-mini-high`**
 
 - **deepseekr1:7b**
 
