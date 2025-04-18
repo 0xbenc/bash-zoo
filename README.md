@@ -59,7 +59,7 @@ To remove the aliases, open your shell configuration file (`~/.bashrc` or `~/.zs
 
 ## Models Used 🤖🧠⚡
 
-- **ChatGPT `4o`, `4.5`, `o3-mini`, and `o3-mini-high`**
+- **ChatGPT `4o`, `4.5`, `o3-mini`, `o3-mini-high`, and `04-mini-high`**
 
 - **deepseekr1:7b**
 
