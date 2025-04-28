@@ -2,7 +2,7 @@
 
 Bash Zoo is a collection of powerful and useful Bash scripts designed to enhance productivity on Linux. It provides a set of handy tools that can be easily installed and accessed from anywhere in the terminal.
 
-## Installation and Usage 📥⚙️🐧
+## Installation and Usage
 
 Follow these steps to clone the repository, grant execution permissions, and run the installer:
 
@@ -42,17 +42,17 @@ source ~/.bashrc  # For Bash
 source ~/.zshrc   # For Zsh
 ```
 
-## Uninstallation ❌🗑️⚠️
+## Uninstallation
 
 To remove the aliases, open your shell configuration file (`~/.bashrc` or `~/.zshrc`) and remove the corresponding alias lines manually.
 
-## Notes 📝📌📢
+## Notes
 
 - Ensure the `installers` and `scripts` directories exist before running `wizard.sh`.
 - The script works on both Bash and Zsh shells.
 - If no scripts are selected, the installation will exit without modifying the system.
 
-## Contributors 👥🤝🌍
+## Contributors
 
 - **Ben Chapman** ([0xbenc](https://github.com/0xbenc)) - Maintainer
 - **Ben Cully** ([BenCully](https://github.com/BenCully)) - Contributor
