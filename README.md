@@ -1,6 +1,6 @@
 # Bash Zoo 🐧🖥️⚡
 
-Bash Zoo is a collection of powerful and useful Bash scripts designed to enhance productivity on Linux. It provides a set of handy tools that can be easily installed and accessed from anywhere in the terminal.
+Bash Zoo is a collection of powerful and useful Bash scripts designed to enhance productivity on Linux. It provides a set of handy tools that can be easily installed and accessed from anywhere in the terminal. Testing dev PRs.
 
 ## Installation and Usage
 
