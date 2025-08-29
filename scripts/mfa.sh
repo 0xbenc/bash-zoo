@@ -1,84 +1,96 @@
 #!/bin/bash
-# Script: mfa.sh
-# Description:
-#   This script recursively searches ~/.password-store for any file named "mfa" (or "mfa.gpg").
-#   It builds an alphabetical list showing the prefix (the secret’s path without the trailing "/mfa")
-#   for each MFA entry. When you choose a token, it retrieves the secret using "pass show"
-#   and generates a TOTP with oathtool. The OTP is then copied to the clipboard using xclip
-#   and displayed in ASCII art using figlet.
-#
-# Usage:
-#   ./mfa.sh
-#
-# Dependencies:
-#   pass
-#   oathtool
-#   figlet
-#   xclip
+# macOS Bash 3.2–compatible MFA helper using pass + oathtool + figlet
+# - No mapfile/readarray
+# - No associative arrays
+# - Uses pbcopy on macOS, xclip if present (Linux)
 
 PASSWORD_STORE_DIR="$HOME/.password-store"
 
 if [[ ! -d "$PASSWORD_STORE_DIR" ]]; then
-    echo "Password store directory '$PASSWORD_STORE_DIR' does not exist."
-    exit 1
+  echo "Password store directory '$PASSWORD_STORE_DIR' does not exist."
+  exit 1
 fi
 
-mapfile -t mfa_files < <(find "$PASSWORD_STORE_DIR" -type f \( -name "mfa" -o -name "mfa.gpg" \))
+# Collect matching files safely (handles spaces) into mfa_files[]
+mfa_files=()
+while IFS= read -r -d '' f; do
+  mfa_files+=("$f")
+done < <(find "$PASSWORD_STORE_DIR" -type f \( -name "mfa" -o -name "mfa.gpg" \) -print0)
 
 if [[ ${#mfa_files[@]} -eq 0 ]]; then
-    echo "No MFA files found in '$PASSWORD_STORE_DIR'."
-    exit 1
+  echo "No MFA files found in '$PASSWORD_STORE_DIR'."
+  exit 1
 fi
 
-declare -A token_to_pass
-declare -A token_to_prefix
+# Build parallel arrays (index-based rather than associative)
+pass_entries=()
+display_prefixes=()
 
+for file in "${mfa_files[@]}"; do
+  relpath="${file#$PASSWORD_STORE_DIR/}"
+  pass_entry="${relpath%.gpg}"
+
+  if [[ "$pass_entry" == */mfa ]]; then
+    display_prefix="${pass_entry%/mfa}"
+  elif [[ "$pass_entry" == "mfa" ]]; then
+    display_prefix="(root)"
+  else
+    display_prefix="$pass_entry"
+  fi
+
+  pass_entries+=("$pass_entry")
+  display_prefixes+=("$display_prefix")
+done
+
+# Limit to 26 items (a–z). Expand if you need more.
 letters=( {a..z} )
+max=${#pass_entries[@]}
+if (( max > 26 )); then
+  echo "Note: Showing first 26 entries (a–z). You have $max matches."
+  max=26
+fi
 
 echo "Available MFA entries:"
-
-counter=0
-for file in "${mfa_files[@]}"; do
-    relpath="${file#$PASSWORD_STORE_DIR/}"
-    pass_entry="${relpath%.gpg}"
-
-    if [[ "$pass_entry" == */mfa ]]; then
-        display_prefix="${pass_entry%/mfa}"
-    elif [[ "$pass_entry" == "mfa" ]]; then
-        display_prefix="(root)"
-    else
-        display_prefix="$pass_entry"
-    fi
-
-    token="${letters[$counter]}"
-    token_to_pass["$token"]="$pass_entry"
-    token_to_prefix["$token"]="$display_prefix"
-
-    echo "  [$token] $display_prefix"
-    ((counter++))
+for ((i=0; i<max; i++)); do
+  echo "  [${letters[$i]}] ${display_prefixes[$i]}"
 done
 
 read -p "Enter the letter corresponding to the MFA you want to generate: " user_choice
 
-if [[ -z "${token_to_pass[$user_choice]}" ]]; then
-    echo "Invalid selection. Exiting."
-    exit 1
+# Find the index of the chosen letter
+choice_idx=-1
+for ((i=0; i<max; i++)); do
+  if [[ "$user_choice" == "${letters[$i]}" ]]; then
+    choice_idx=$i
+    break
+  fi
+done
+
+if (( choice_idx < 0 )); then
+  echo "Invalid selection. Exiting."
+  exit 1
 fi
 
-selected_pass="${token_to_pass[$user_choice]}"
+selected_pass="${pass_entries[$choice_idx]}"
 
-otp=$(oathtool --totp -b "$(pass show "$selected_pass")")
-
-if [[ $? -ne 0 ]]; then
-    echo "Failed to generate OTP for '$selected_pass'."
-    exit 1
+# Generate OTP
+otp="$(oathtool --totp -b "$(pass show "$selected_pass")")"
+if [[ $? -ne 0 || -z "$otp" ]]; then
+  echo "Failed to generate OTP for '$selected_pass'."
+  exit 1
 fi
 
-# Copy OTP to clipboard using xclip
-echo -n "$otp" | xclip -selection clipboard
+# Copy to clipboard: pbcopy (macOS) or xclip (Linux)
+if command -v pbcopy >/dev/null 2>&1; then
+  printf "%s" "$otp" | pbcopy
+elif command -v xclip >/dev/null 2>&1; then
+  printf "%s" "$otp" | xclip -selection clipboard
+else
+  echo "Warning: No clipboard tool found (pbcopy/xclip). OTP not copied." >&2
+fi
 
-# Output confirmation
-figlet_text=$(echo "$otp" | sed 's/./& /g' | sed 's/ $//')
+# Pretty print with figlet spacing
+figlet_text="$(printf "%s" "$otp" | sed 's/./& /g; s/ $//')"
 
-echo "OTP for [$user_choice] (${token_to_prefix[$user_choice]}): copied to clipboard."
+echo "OTP for [${letters[$choice_idx]}] (${display_prefixes[$choice_idx]}): copied to clipboard."
 figlet "$figlet_text"
