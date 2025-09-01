@@ -4,10 +4,10 @@ Bash Zoo is a collection of powerful and useful Bash scripts designed to enhance
 
 ## Installation and Usage
 
-This project supports Debian-like Linux and macOS with different capabilities:
+This project supports Debian-like Linux and macOS with different capabilities. The wizard uses a small registry (`installers/registry.tsv`) to decide which scripts appear on each OS and whether they need package installs or are alias-only:
 
-- Debian/Ubuntu/Pop: All scripts are available. Dependencies install via `apt`.
-- macOS: Only `mfa` is available. Homebrew must be installed first.
+- Debian/Ubuntu/Pop: `mfa`, `share`, `uuid` install dependencies via `apt`; `zapp`, `zapper` are alias-only (no installers).
+- macOS: Only `mfa` is offered; it installs dependencies via Homebrew. `zapp` and `zapper` are not shown on macOS.
 - Other platforms: No installers or options are offered.
 
 Follow these steps to clone the repository, grant execution permissions, and run the installer:
@@ -68,8 +68,9 @@ To remove the aliases, open your shell configuration file (`~/.bashrc` or `~/.zs
 - Ensure the `installers` and `scripts` directories exist before running `wizard.sh`.
 - The script works on both Bash and Zsh shells.
 - If no scripts are selected, the installation will exit without modifying the system.
-- On macOS, only `mfa` is supported; Homebrew is required and must be present before running the wizard.
-- On Debian-like Linux, dependencies are installed per script via `apt`.
+- The registry (`installers/registry.tsv`) controls OS availability and whether a script runs an installer or is alias-only.
+- On macOS, only `mfa` is supported; Homebrew is required.
+- On Debian-like Linux, `mfa`, `share`, `uuid` install deps via `apt`; `zapp`, `zapper` are alias-only.
 
 ## Contributors
 

@@ -1,0 +1,9 @@
+# script	oses	has_deps
+# oses: comma-separated from {debian,macos}
+# has_deps: yes => run installers/$os/$script.sh, no => chmod + alias only
+mfa	debian,macos	yes
+share	debian	yes
+uuid	debian	yes
+zapp	debian	no
+zapper	debian	no
+

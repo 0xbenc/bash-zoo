@@ -5,10 +5,16 @@ set -euo pipefail
 # Directories
 INSTALLERS_DIR="installers"
 SCRIPTS_DIR="scripts"
+REGISTRY_FILE="$INSTALLERS_DIR/registry.tsv"
 
 # Ensure directories exist
 if [[ ! -d "$INSTALLERS_DIR" || ! -d "$SCRIPTS_DIR" ]]; then
     echo "Error: Both '$INSTALLERS_DIR' and '$SCRIPTS_DIR' directories must exist."
+    exit 1
+fi
+
+if [[ ! -f "$REGISTRY_FILE" ]]; then
+    echo "Error: Missing registry file: $REGISTRY_FILE"
     exit 1
 fi
 
@@ -23,23 +29,58 @@ elif [[ "$UNAME_S" == "Linux" ]]; then
     fi
 fi
 
-# Collect script names based on platform
-if [[ "$OS_TYPE" == "debian" ]]; then
-    mapfile -t scripts < <(ls "$SCRIPTS_DIR" | grep '\.sh$' | sed 's/\.sh$//')
-elif [[ "$OS_TYPE" == "macos" ]]; then
-    # macOS: only support MFA
-    if [[ -f "$SCRIPTS_DIR/mfa.sh" ]]; then
-        scripts=("mfa")
-    else
-        echo "This repo currently supports only 'mfa' on macOS, but it was not found."
-        exit 1
-    fi
-else
+if [[ "$OS_TYPE" == "other" ]]; then
     echo "Unsupported platform (not Debian-like Linux or macOS). No installers available."
     exit 0
 fi
 
-selected=($(for _ in "${scripts[@]}"; do echo 0; done))
+# Read registry and build candidate list for this OS
+scripts=()
+scripts_has_deps=()
+
+while IFS=$'\t' read -r name oses has_deps _rest; do
+    # skip comments and empty lines
+    [[ -z "${name:-}" ]] && continue
+    [[ "$name" =~ ^# ]] && continue
+    # optional header line
+    if [[ "$name" == "script" ]]; then
+        continue
+    fi
+
+    # verify the script exists
+    if [[ ! -f "$SCRIPTS_DIR/$name.sh" ]]; then
+        # silently skip registry entries without a script
+        continue
+    fi
+
+    # check OS allowlist
+    include=0
+    IFS=',' read -r -a os_list <<< "$oses"
+    for os in "${os_list[@]}"; do
+        if [[ "$os" == "$OS_TYPE" ]]; then
+            include=1
+            break
+        fi
+    done
+    if [[ $include -eq 1 ]]; then
+        scripts+=("$name")
+        # normalize has_deps to yes/no without bash 4 lowercase feature
+        deps_norm=$(printf '%s' "$has_deps" | tr '[:upper:]' '[:lower:]')
+        case "$deps_norm" in
+            yes|true|1) scripts_has_deps+=("yes") ;;
+            *)          scripts_has_deps+=("no")  ;;
+        esac
+    fi
+done < "$REGISTRY_FILE"
+
+if [[ ${#scripts[@]} -eq 0 ]]; then
+    echo "No installable scripts defined for OS '$OS_TYPE' in $REGISTRY_FILE"
+    exit 0
+fi
+
+# selection state
+selected=()
+for _ in "${scripts[@]}"; do selected+=(0); done
 current=0
 
 draw_menu() {
@@ -59,7 +100,13 @@ draw_menu() {
             echo -ne "[ ] "
         fi
 
-        echo -e "${scripts[i]}\e[0m"
+        label="${scripts[i]}"
+        if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
+            label+=" (installer)"
+        else
+            label+=" (alias-only)"
+        fi
+        echo -e "$label\e[0m"
     done
 }
 
@@ -101,6 +148,19 @@ add_or_update_alias() {
     fi
 }
 
+install_with_installer() {
+    local name="$1"
+    local os="$2"
+    local path="$INSTALLERS_DIR/$os/$name.sh"
+    if [[ -x "$path" ]]; then
+        chmod +x "$path"
+        "$path"
+        return 0
+    fi
+    echo "Warning: no installer for '$name' (expected $path)." >&2
+    return 1
+}
+
 # Process selected scripts
 for i in "${!scripts[@]}"; do
     if [[ ${selected[i]} -eq 1 ]]; then
@@ -108,24 +168,11 @@ for i in "${!scripts[@]}"; do
         selected_scripts+=("$script_name")
         chmod +x "$SCRIPTS_DIR/$script_name.sh"
 
-        case "$OS_TYPE" in
-            debian)
-                if [[ -x "$INSTALLERS_DIR/debian/$script_name.sh" ]]; then
-                    chmod +x "$INSTALLERS_DIR/debian/$script_name.sh"
-                    "$INSTALLERS_DIR/debian/$script_name.sh"
-                else
-                    echo "Warning: no installer for '$script_name' (expected $INSTALLERS_DIR/debian/$script_name.sh)."
-                fi
-                ;;
-            macos)
-                if [[ -x "$INSTALLERS_DIR/macos/$script_name.sh" ]]; then
-                    chmod +x "$INSTALLERS_DIR/macos/$script_name.sh"
-                    "$INSTALLERS_DIR/macos/$script_name.sh"
-                else
-                    echo "Warning: no macOS installer for '$script_name' (expected $INSTALLERS_DIR/macos/$script_name.sh)."
-                fi
-                ;;
-        esac
+        if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
+            install_with_installer "$script_name" "$OS_TYPE" || true
+        else
+            echo "Skipping installer for '$script_name' (alias-only)."
+        fi
     fi
 done
 
@@ -145,6 +192,7 @@ if [[ ${#selected_scripts[@]} -gt 0 ]]; then
     done
     echo "Reloading shell configuration..."
     # shellcheck disable=SC1090
+    # shellcheck disable=SC1091
     source "$RC_FILE" || true
 else
     echo "No scripts selected. Exiting."
