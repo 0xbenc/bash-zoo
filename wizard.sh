@@ -152,8 +152,9 @@ install_with_installer() {
     local name="$1"
     local os="$2"
     local path="$INSTALLERS_DIR/$os/$name.sh"
-    if [[ -x "$path" ]]; then
-        chmod +x "$path"
+    # Run installer if file exists; set executable bit if needed
+    if [[ -f "$path" ]]; then
+        chmod +x "$path" || true
         "$path"
         return 0
     fi
@@ -190,10 +191,9 @@ if [[ ${#selected_scripts[@]} -gt 0 ]]; then
     for script in "${selected_scripts[@]}"; do
         add_or_update_alias "$script" "$PWD/$SCRIPTS_DIR/$script.sh" "$RC_FILE"
     done
-    echo "Reloading shell configuration..."
-    # shellcheck disable=SC1090
-    # shellcheck disable=SC1091
-    source "$RC_FILE" || true
+    echo "Aliases added. Open a new terminal or run:"
+    echo "  exec $USER_SHELL -l"
+    echo "to reload your shell configuration. Skipping auto-reload to avoid cross-shell issues."
 else
     echo "No scripts selected. Exiting."
 fi
