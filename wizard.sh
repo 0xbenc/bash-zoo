@@ -314,7 +314,70 @@ for i in "${!scripts[@]}"; do
     done
 done
 
-# Add selected scripts to shell rc idempotently
+# Determine robust install target directory
+resolve_target_dir() {
+    # Linux prefers ~/.local/bin; macOS prefers ~/bin
+    if [[ "$OS_TYPE" == "debian" ]]; then
+        printf '%s\n' "$HOME/.local/bin"
+    else
+        printf '%s\n' "$HOME/bin"
+    fi
+}
+
+ensure_dir() {
+    local dir="$1"
+    if [[ -d "$dir" ]]; then
+        return 0
+    fi
+    mkdir -p "$dir" 2>/dev/null || return 1
+}
+
+is_writable_dir() {
+    local dir="$1"
+    [[ -d "$dir" && -w "$dir" ]]
+}
+
+path_has_dir() {
+    local dir="$1"
+    local p
+    IFS=":" read -r -a _parts <<< "${PATH:-}"
+    for p in "${_parts[@]}"; do
+        if [[ "$p" == "$dir" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+add_path_line() {
+    local rc_file="$1" dir="$2"
+    local line
+    line="export PATH=\"$dir:\$PATH\"  # bash-zoo"
+    touch "$rc_file"
+    if grep -qE "(^|:)${dir//\//\/}(:|\")" <<<":$PATH:"; then
+        return 0
+    fi
+    if ! grep -q "bash-zoo" "$rc_file" 2>/dev/null; then
+        echo "$line" >> "$rc_file"
+        return 0
+    fi
+    # If a previous bash-zoo PATH line exists but without this dir, append a fresh one
+    echo "$line" >> "$rc_file"
+}
+
+install_file() {
+    local src="$1" dst_dir="$2" name="$3" mode="$4" # mode: copy|symlink
+    local dst="$dst_dir/$name"
+    if [[ "$mode" == "symlink" ]]; then
+        ln -sf "$src" "$dst" 2>/dev/null || return 1
+    else
+        # copy
+        cp -f "$src" "$dst" 2>/dev/null || return 1
+    fi
+    chmod +x "$dst" 2>/dev/null || true
+}
+
+# Perform installation: prefer bin dir, fallback to aliases per-script
 if [[ ${#selected_scripts[@]} -gt 0 ]]; then
     USER_SHELL=$(basename "${SHELL:-}")
     RC_FILE=""
@@ -324,16 +387,57 @@ if [[ ${#selected_scripts[@]} -gt 0 ]]; then
         *)    RC_FILE="$HOME/.bashrc" ;;
     esac
 
-    echo "Configuring aliases in $RC_FILE ..."
-    for script in "${selected_scripts[@]}"; do
-        add_or_update_alias "$script" "$PWD/$SCRIPTS_DIR/$script.sh" "$RC_FILE"
-    done
-    echo "Aliases added. Open a new terminal or run:"
-    echo "  exec $USER_SHELL -l"
-    echo "to reload your shell configuration. Skipping auto-reload to avoid cross-shell issues."
+    target_dir=$(resolve_target_dir)
+    install_mode="copy"
+    if [[ "${BZ_SYMLINK:-}" == "1" || "${BZ_SYMLINK:-}" == "true" ]]; then
+        install_mode="symlink"
+    fi
+
+    installed_to_bin=()
+    installed_as_alias=()
+
+    if ensure_dir "$target_dir" && is_writable_dir "$target_dir"; then
+        for script in "${selected_scripts[@]}"; do
+            src="$PWD/$SCRIPTS_DIR/$script.sh"
+            if install_file "$src" "$target_dir" "$script" "$install_mode"; then
+                installed_to_bin+=("$script")
+            else
+                add_or_update_alias "$script" "$src" "$RC_FILE"
+                installed_as_alias+=("$script")
+            fi
+        done
+    else
+        echo "Note: Unable to write to $target_dir; falling back to aliases in $RC_FILE"
+        for script in "${selected_scripts[@]}"; do
+            add_or_update_alias "$script" "$PWD/$SCRIPTS_DIR/$script.sh" "$RC_FILE"
+            installed_as_alias+=("$script")
+        done
+    fi
+
+    # Ensure PATH if we installed any into bin
+    if [[ ${#installed_to_bin[@]} -gt 0 ]]; then
+        if path_has_dir "$target_dir"; then
+            echo "PATH already includes $target_dir"
+        else
+            echo "Adding $target_dir to PATH in $RC_FILE ..."
+            add_path_line "$RC_FILE" "$target_dir"
+            echo "Added. Reload your shell to apply:"
+            echo "  exec $USER_SHELL -l"
+        fi
+    fi
+
+    # Summaries
+    if [[ ${#installed_to_bin[@]} -gt 0 ]]; then
+        echo "Installed to $target_dir: ${installed_to_bin[*]}"
+    fi
+    if [[ ${#installed_as_alias[@]} -gt 0 ]]; then
+        echo "Configured aliases in $RC_FILE: ${installed_as_alias[*]}"
+        echo "Reload your shell to use aliases:"
+        echo "  exec $USER_SHELL -l"
+    fi
 else
     echo "No scripts selected. Exiting."
     exit 0
 fi
 
-echo "Installation complete! You can now use the selected scripts as commands."
+echo "Installation complete!"
