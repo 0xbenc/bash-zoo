@@ -78,49 +78,137 @@ if [[ ${#scripts[@]} -eq 0 ]]; then
     exit 0
 fi
 
-# selection state
-selected=()
-for _ in "${scripts[@]}"; do selected+=(0); done
-current=0
+#############################################
+# Interactive selection (enquirer-style)
+#############################################
 
-draw_menu() {
-    clear
-    echo "Use 'J' and 'K' to move, 'H' to toggle, 'L' to confirm."
-    echo "Detected platform: $OS_TYPE"
-    for i in "${!scripts[@]}"; do
-        if [[ $i -eq $current ]]; then
-            echo -ne "\e[1;32m> "
-        else
-            echo -ne "  "
-        fi
+ensure_enquirer() {
+    # Requires node; then ensures enquirer is resolvable (tries local vendor)
+    if ! command -v node >/dev/null 2>&1; then
+        return 1
+    fi
 
-        if [[ ${selected[i]} -eq 1 ]]; then
-            echo -ne "[✔ ] "
-        else
-            echo -ne "[ ] "
-        fi
+    # Check if enquirer is already resolvable (including via vendor path)
+    if NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" \
+       node -e "require('enquirer')" >/dev/null 2>&1; then
+        return 0
+    fi
 
-        label="${scripts[i]}"
-        if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
-            label+=" (installer)"
-        else
-            label+=" (alias-only)"
-        fi
-        echo -e "$label\e[0m"
-    done
+    # Attempt to install enquirer to local vendor dir (.interactive)
+    mkdir -p "$PWD/.interactive"
+    if [[ ! -f "$PWD/.interactive/package.json" ]]; then
+        printf '{"name":"bash-zoo-interactive","private":true}\n' > "$PWD/.interactive/package.json"
+    fi
+
+    # Choose a package manager (prefer npm; fallback to pnpm/yarn/bun)
+    PM=""
+    if command -v npm >/dev/null 2>&1; then
+        PM="npm"
+    elif command -v pnpm >/dev/null 2>&1; then
+        PM="pnpm"
+    elif command -v yarn >/dev/null 2>&1; then
+        PM="yarn"
+    elif command -v bun >/dev/null 2>&1; then
+        PM="bun"
+    else
+        return 1
+    fi
+
+    echo "Preparing modern selector (installing enquirer)..."
+    case "$PM" in
+        npm)
+            ( cd "$PWD/.interactive" && npm install --silent enquirer@^2 ) || return 1 ;;
+        pnpm)
+            ( cd "$PWD/.interactive" && pnpm add -s enquirer@^2 ) || return 1 ;;
+        yarn)
+            ( cd "$PWD/.interactive" && yarn add -s enquirer@^2 ) || return 1 ;;
+        bun)
+            ( cd "$PWD/.interactive" && bun add -y enquirer@^2 ) || return 1 ;;
+    esac
+
+    # Re-check
+    if NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" \
+       node -e "require('enquirer')" >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
 }
 
-# Handle user input
-while true; do
-    draw_menu
-    read -rsn1 input
-    case "$input" in
-        "k") ((current = (current - 1 + ${#scripts[@]}) % ${#scripts[@]})) ;;
-        "j") ((current = (current + 1) % ${#scripts[@]})) ;;
-        "h") selected[current]=$((1 - selected[current])) ;;
-        "l") break ;;
-    esac
+# Build JSON payload for the Node-based selector
+payload='{ "title": "Select scripts to install", "choices": ['
+for i in "${!scripts[@]}"; do
+    label="${scripts[i]}"
+    if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
+        label+=" (installer)"
+    else
+        label+=" (alias-only)"
+    fi
+    # escape quotes in label just in case
+    esc_label=$(printf '%s' "$label" | sed 's/"/\\"/g')
+    esc_name=$(printf '%s' "${scripts[i]}" | sed 's/"/\\"/g')
+    payload+="{\"name\":\"$esc_name\",\"message\":\"$esc_label\"},"
 done
+# Trim trailing comma and close array
+payload=${payload%,}
+payload+='] }'
+
+# Run the selector; collect selected names (one per line)
+if ensure_enquirer; then
+    selected_names=()
+    # Pass payload in env var to keep stdin/tty free for interactivity
+    while IFS= read -r __sel_line; do
+        [[ -z "${__sel_line:-}" ]] && continue
+        selected_names+=("$__sel_line")
+    done < <(BZ_PAYLOAD="$payload" NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" node "bin/select.js")
+else
+    # Fallback to the original minimal interactivity when Node or enquirer are unavailable
+    selected=()
+    for _ in "${scripts[@]}"; do selected+=(0); done
+    current=0
+    draw_menu() {
+        clear
+        echo "Use 'J' and 'K' to move, 'H' to toggle, 'L' to confirm."
+        echo "Detected platform: $OS_TYPE"
+        for i in "${!scripts[@]}"; do
+            if [[ $i -eq $current ]]; then
+                echo -ne "\e[1;32m> "
+            else
+                echo -ne "  "
+            fi
+
+            if [[ ${selected[i]} -eq 1 ]]; then
+                echo -ne "[✔ ] "
+            else
+                echo -ne "[ ] "
+            fi
+
+            label="${scripts[i]}"
+            if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
+                label+=" (installer)"
+            else
+                label+=" (alias-only)"
+            fi
+            echo -e "$label\e[0m"
+        done
+    }
+    while true; do
+        draw_menu
+        read -rsn1 input
+        case "$input" in
+            "k") ((current = (current - 1 + ${#scripts[@]}) % ${#scripts[@]})) ;;
+            "j") ((current = (current + 1) % ${#scripts[@]})) ;;
+            "h") selected[current]=$((1 - selected[current])) ;;
+            "l") break ;;
+        esac
+    done
+    # Convert fallback selections into the same selected_names format
+    selected_names=()
+    for i in "${!scripts[@]}"; do
+        if [[ ${selected[i]} -eq 1 ]]; then
+            selected_names+=("${scripts[i]}")
+        fi
+    done
+fi
 
 clear
 echo "Installing selected scripts..."
@@ -164,17 +252,21 @@ install_with_installer() {
 
 # Process selected scripts
 for i in "${!scripts[@]}"; do
-    if [[ ${selected[i]} -eq 1 ]]; then
-        script_name="${scripts[i]}"
-        selected_scripts+=("$script_name")
-        chmod +x "$SCRIPTS_DIR/$script_name.sh"
+    script_name="${scripts[i]}"
+    # check if this script_name was selected
+    for sel in "${selected_names[@]:-}"; do
+        if [[ "$sel" == "$script_name" ]]; then
+            selected_scripts+=("$script_name")
+            chmod +x "$SCRIPTS_DIR/$script_name.sh"
 
-        if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
-            install_with_installer "$script_name" "$OS_TYPE" || true
-        else
-            echo "Skipping installer for '$script_name' (alias-only)."
+            if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
+                install_with_installer "$script_name" "$OS_TYPE" || true
+            else
+                echo "Skipping installer for '$script_name' (alias-only)."
+            fi
+            break
         fi
-    fi
+    done
 done
 
 # Add selected scripts to shell rc idempotently
@@ -196,6 +288,7 @@ if [[ ${#selected_scripts[@]} -gt 0 ]]; then
     echo "to reload your shell configuration. Skipping auto-reload to avoid cross-shell issues."
 else
     echo "No scripts selected. Exiting."
+    exit 0
 fi
 
 echo "Installation complete! You can now use the selected scripts as commands."

@@ -43,10 +43,11 @@ On macOS, the wizard will only offer `mfa` and will install its dependencies usi
 
 ### 5. Follow the On-Screen Instructions
 
-- Use `J` and `K` to navigate the script selection.
-- Press `H` to toggle selection.
-- Press `L` to confirm and proceed with installation.
- - The wizard auto-detects your platform and shows supported scripts only.
+- Use the arrow keys to navigate the list.
+- Press space to select/deselect items; press enter to confirm.
+- The wizard auto-installs a tiny runtime (enquirer) locally if needed.
+- If Node isn’t available, it falls back to the classic hjkl UI.
+- The wizard auto-detects your platform and shows supported scripts only.
 
 ### 6. Usage After Installation
 
