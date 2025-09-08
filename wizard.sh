@@ -73,10 +73,45 @@ while IFS=$'\t' read -r name oses has_deps _rest; do
     fi
 done < "$REGISTRY_FILE"
 
+# Group zapp + zapper into a single selectable pair "zapps"
+zapp_idx=-1
+zapper_idx=-1
+for i in "${!scripts[@]}"; do
+    case "${scripts[i]}" in
+        zapp)   zapp_idx=$i ;;
+        zapper) zapper_idx=$i ;;
+    esac
+done
+if [[ $zapp_idx -ge 0 || $zapper_idx -ge 0 ]]; then
+    new_scripts=()
+    new_has_deps=()
+    for i in "${!scripts[@]}"; do
+        name="${scripts[i]}"
+        # Skip individual entries; we will add the grouped one below
+        if [[ "$name" == "zapp" || "$name" == "zapper" ]]; then
+            continue
+        fi
+        new_scripts+=("$name")
+        new_has_deps+=("${scripts_has_deps[i]}")
+    done
+    # Insert grouped entry once if either exists for this OS
+    new_scripts+=("zapps")
+    # has_deps is "yes" if either zapp or zapper had deps
+    dep_flag="no"
+    if [[ $zapp_idx -ge 0 && "${scripts_has_deps[$zapp_idx]}" == "yes" ]]; then dep_flag="yes"; fi
+    if [[ $zapper_idx -ge 0 && "${scripts_has_deps[$zapper_idx]}" == "yes" ]]; then dep_flag="yes"; fi
+    new_has_deps+=("$dep_flag")
+    scripts=("${new_scripts[@]}")
+    scripts_has_deps=("${new_has_deps[@]}")
+fi
+
 if [[ ${#scripts[@]} -eq 0 ]]; then
     echo "No installable scripts defined for OS '$OS_TYPE' in $REGISTRY_FILE"
     exit 0
 fi
+
+# Ensure the uninstaller is executable for convenience
+chmod +x "$PWD/uninstall.sh" 2>/dev/null || true
 
 #############################################
 # Interactive selection (enquirer-style)
@@ -138,10 +173,8 @@ ensure_enquirer() {
 payload='{ "title": "Select scripts to install", "choices": ['
 for i in "${!scripts[@]}"; do
     label="${scripts[i]}"
-    if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
-        label+=" (installer)"
-    else
-        label+=" (alias-only)"
+    if [[ "${scripts[i]}" == "zapps" ]]; then
+        label="zapps (zapp+zapper)"
     fi
     # escape quotes in label just in case
     esc_label=$(printf '%s' "$label" | sed 's/"/\\"/g')
@@ -183,10 +216,8 @@ else
             fi
 
             label="${scripts[i]}"
-            if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
-                label+=" (installer)"
-            else
-                label+=" (alias-only)"
+            if [[ "${scripts[i]}" == "zapps" ]]; then
+                label="zapps (zapp+zapper)"
             fi
             echo -e "$label\e[0m"
         done
@@ -253,16 +284,30 @@ install_with_installer() {
 # Process selected scripts
 for i in "${!scripts[@]}"; do
     script_name="${scripts[i]}"
-    # check if this script_name was selected
     for sel in "${selected_names[@]:-}"; do
         if [[ "$sel" == "$script_name" ]]; then
-            selected_scripts+=("$script_name")
-            chmod +x "$SCRIPTS_DIR/$script_name.sh"
-
-            if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
-                install_with_installer "$script_name" "$OS_TYPE" || true
+            if [[ "$script_name" == "zapps" ]]; then
+                # Expand to zapp + zapper
+                for sub in zapp zapper; do
+                    if [[ -f "$SCRIPTS_DIR/$sub.sh" ]]; then
+                        selected_scripts+=("$sub")
+                        chmod +x "$SCRIPTS_DIR/$sub.sh"
+                        # If grouped has deps, attempt installer for each sub
+                        if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
+                            install_with_installer "$sub" "$OS_TYPE" || true
+                        else
+                            echo "No installer needed for '$sub'."
+                        fi
+                    fi
+                done
             else
-                echo "Skipping installer for '$script_name' (alias-only)."
+                selected_scripts+=("$script_name")
+                chmod +x "$SCRIPTS_DIR/$script_name.sh"
+                if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
+                    install_with_installer "$script_name" "$OS_TYPE" || true
+                else
+                    echo "No installer needed for '$script_name'."
+                fi
             fi
             break
         fi
