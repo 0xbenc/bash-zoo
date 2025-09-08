@@ -23,8 +23,6 @@ sudo chmod +x wizard.sh
 
 ## Uninstall
 
-Interactive removal of installed binaries and/or aliases:
-
 ```bash
 ./uninstall.sh
 ```
