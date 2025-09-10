@@ -1,133 +1,123 @@
 #!/bin/bash
+set -euo pipefail
 # Script: zapp.sh
 # Description:
-#   This script lists folders one level down from the '$HOME/zapps' directory,
-#   assigns each a unique key (a, b, c, …), and waits for the user to input
-#   a key. When a valid key is entered, it will:
-#     - Run the 'zapp.AppImage' if it exists in the selected folder, or
-#     - If a 'zapp.md' file exists, use its stored relative executable path,
-#     - Otherwise, search for executable files (in the folder or its single subdirectory)
-#       and run one.
-#
-# Usage:
-#   ./zapp.sh
+#   Lists folders under "$HOME/zapps" and launches the selected app.
+#   Order of preference per app folder:
+#     1) Run zapp.AppImage if present
+#     2) If zapp.md exists, run the relative executable it names
+#     3) Fallback: find executable files (in folder or its single subdir) and prompt
 
-# Set the directory containing the zapp folders
 ZAPPS_DIR="$HOME/zapps"
 
-# Check if the zapps directory exists
 if [[ ! -d "$ZAPPS_DIR" ]]; then
-    echo "Directory '$ZAPPS_DIR' does not exist."
-    exit 1
+  echo "Directory '$ZAPPS_DIR' does not exist."
+  exit 1
 fi
 
-# Declare an associative array to map keys to folder paths.
-declare -A folder_map
+folders=()
+while IFS= read -r -d '' d; do
+  folders+=("$d")
+done < <(find "$ZAPPS_DIR" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
 
-# Array of letters for unique keys.
+if [[ ${#folders[@]} -eq 0 ]]; then
+  echo "No zapp folders found in '$ZAPPS_DIR'."
+  exit 1
+fi
+
 letters=( {a..z} )
-
 echo "Available zapps:"
-counter=0
-# Loop through each item one level down in ZAPPS_DIR.
-for folder in "$ZAPPS_DIR"/*; do
-    if [[ -d "$folder" ]]; then
-        key="${letters[$counter]}"
-        folder_map["$key"]="$folder"
-        folder_name=$(basename "$folder")
-        echo "  [$key] $folder_name"
-        ((counter++))
-    fi
+for i in "${!folders[@]}"; do
+  key="${letters[$i]}"
+  name=$(basename "${folders[$i]}")
+  echo "  [$key] $name"
+  # Stop listing if we exceed letters range
+  if [[ $i -ge 25 ]]; then break; fi
 done
 
-# Check if any folders were found.
-if [[ $counter -eq 0 ]]; then
-    echo "No zapp folders found in '$ZAPPS_DIR'."
-    exit 1
+read -r -p "Enter the letter corresponding to the zapp you want to run: " user_key
+
+# Translate letter to index
+sel_idx=-1
+for i in "${!folders[@]}"; do
+  if [[ "$user_key" == "${letters[$i]}" ]]; then sel_idx=$i; break; fi
+  if [[ $i -ge 25 ]]; then break; fi
+done
+
+if [[ $sel_idx -lt 0 ]]; then
+  echo "Invalid selection. Exiting."
+  exit 1
 fi
 
-# Prompt the user to choose a zapp by its key.
-read -p "Enter the letter corresponding to the zapp you want to run: " user_key
-
-# Validate the user's input.
-if [[ -z "${folder_map[$user_key]}" ]]; then
-    echo "Invalid selection. Exiting."
-    exit 1
-fi
-
-# Retrieve the selected folder.
-selected_folder="${folder_map[$user_key]}"
+selected_folder="${folders[$sel_idx]}"
 folder_basename=$(basename "$selected_folder")
 
-# First, check if there's a 'zapp.AppImage' file.
+# 1) zapp.AppImage
 if [[ -f "$selected_folder/zapp.AppImage" ]]; then
-    APPIMAGE_PATH="$selected_folder/zapp.AppImage"
-    if [[ ! -x "$APPIMAGE_PATH" ]]; then
-        echo "File '$APPIMAGE_PATH' is not executable."
-        exit 1
-    fi
-    echo "Running $folder_basename using zapp.AppImage..."
-    "$APPIMAGE_PATH"
-    exit 0
-fi
-
-# Next, check if a markdown file exists that registers the main executable.
-ZAPP_MD="$selected_folder/zapp.md"
-if [[ -f "$ZAPP_MD" ]]; then
-    # The file is expected to contain a relative path, e.g.:
-    # ./bin/main_executable
-    REL_PATH=$(head -n 1 "$ZAPP_MD" | tr -d '\r\n')
-    if [[ -n "$REL_PATH" ]]; then
-        MAIN_EXE="$selected_folder/$REL_PATH"
-        if [[ -x "$MAIN_EXE" ]]; then
-            echo "Running $folder_basename using registered main executable: $(basename "$MAIN_EXE")..."
-            "$MAIN_EXE"
-            exit 0
-        else
-            echo "The executable '$MAIN_EXE' (from zapp.md) is not found or not executable."
-        fi
-    fi
-fi
-
-# Fallback: If no AppImage or markdown file is found, attempt to find executables.
-# If the folder contains exactly one subdirectory, assume that is the actual app folder.
-subdirs=( "$selected_folder"/*/ )
-if [[ ${#subdirs[@]} -eq 1 ]]; then
-    search_dir="${subdirs[0]}"
-else
-    search_dir="$selected_folder"
-fi
-
-# Look for executable files (only regular files) in the chosen directory.
-mapfile -t executables < <(find "$search_dir" -maxdepth 1 -type f -executable)
-exe_count=${#executables[@]}
-
-if [[ $exe_count -eq 0 ]]; then
-    echo "No executable file found in '$search_dir'."
+  app="$selected_folder/zapp.AppImage"
+  if [[ ! -x "$app" ]]; then
+    echo "File '$app' is not executable."
     exit 1
-elif [[ $exe_count -eq 1 ]]; then
-    echo "Running $(basename "$search_dir") using $(basename "${executables[0]}")..."
-    "${executables[0]}"
-    exit 0
-else
-    # More than one executable found; prompt the user to select one.
-    declare -A exe_map
-    echo "Multiple executables found in '$search_dir'. Choose one:"
-    counter=0
-    for exe in "${executables[@]}"; do
-        key="${letters[$counter]}"
-        exe_map["$key"]="$exe"
-        exe_name=$(basename "$exe")
-        echo "  [$key] $exe_name"
-        ((counter++))
-    done
-    read -p "Enter the letter corresponding to the executable you want to run: " exe_choice
-    if [[ -z "${exe_map[$exe_choice]}" ]]; then
-        echo "Invalid selection. Exiting."
-        exit 1
+  fi
+  echo "Running $folder_basename using zapp.AppImage..."
+  exec "$app"
+fi
+
+# 2) zapp.md (relative path)
+zapp_md="$selected_folder/zapp.md"
+if [[ -f "$zapp_md" ]]; then
+  rel_path=$(head -n 1 "$zapp_md" | tr -d '\r\n')
+  if [[ -n "$rel_path" ]]; then
+    main_exe="$selected_folder/$rel_path"
+    if [[ -x "$main_exe" ]]; then
+      echo "Running $folder_basename using registered executable: $(basename "$main_exe")..."
+      exec "$main_exe"
+    else
+      echo "Executable from zapp.md not found or not executable: $main_exe"
     fi
-    chosen_exe="${exe_map[$exe_choice]}"
-    echo "Running $(basename "$chosen_exe")..."
-    "$chosen_exe"
-    exit 0
+  fi
+fi
+
+# 3) Fallback: discover executables
+search_dir="$selected_folder"
+subdir_count=0
+only_sub=""
+while IFS= read -r -d '' sub; do
+  only_sub="$sub"
+  subdir_count=$((subdir_count+1))
+done < <(find "$selected_folder" -mindepth 1 -maxdepth 1 -type d -print0)
+if [[ $subdir_count -eq 1 ]]; then
+  search_dir="$only_sub"
+fi
+
+executables=()
+while IFS= read -r -d '' f; do
+  executables+=("$f")
+done < <(find "$search_dir" -maxdepth 1 -type f \( -perm -u+x -o -perm -g+x -o -perm -o+x \) -print0)
+
+exe_count=${#executables[@]}
+if [[ $exe_count -eq 0 ]]; then
+  echo "No executable file found in '$search_dir'."
+  exit 1
+elif [[ $exe_count -eq 1 ]]; then
+  echo "Running $(basename "$search_dir") using $(basename "${executables[0]}")..."
+  exec "${executables[0]}"
+else
+  echo "Multiple executables found in '$search_dir'. Choose one:"
+  for i in "${!executables[@]}"; do
+    echo "  [${letters[$i]}] $(basename "${executables[$i]}")"
+    if [[ $i -ge 25 ]]; then break; fi
+  done
+  read -r -p "Enter the letter corresponding to the executable you want to run: " exe_key
+  pick=-1
+  for i in "${!executables[@]}"; do
+    if [[ "$exe_key" == "${letters[$i]}" ]]; then pick=$i; break; fi
+    if [[ $i -ge 25 ]]; then break; fi
+  done
+  if [[ $pick -lt 0 ]]; then
+    echo "Invalid selection. Exiting."
+    exit 1
+  fi
+  echo "Running $(basename "${executables[$pick]}")..."
+  exec "${executables[$pick]}"
 fi

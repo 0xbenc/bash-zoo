@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # macOS Bash 3.2–compatible MFA helper using pass + oathtool + figlet
 # - No mapfile/readarray
 # - No associative arrays
@@ -74,8 +75,13 @@ fi
 selected_pass="${pass_entries[$choice_idx]}"
 
 # Generate OTP
+if ! command -v pass >/dev/null 2>&1 || ! command -v oathtool >/dev/null 2>&1; then
+  echo "Missing dependencies: require 'pass' and 'oathtool'." >&2
+  exit 1
+fi
+
 otp="$(oathtool --totp -b "$(pass show "$selected_pass")")"
-if [[ $? -ne 0 || -z "$otp" ]]; then
+if [[ -z "$otp" ]]; then
   echo "Failed to generate OTP for '$selected_pass'."
   exit 1
 fi

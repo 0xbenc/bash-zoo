@@ -7,7 +7,6 @@ Works on Debian/Ubuntu and macOS.
 ```bash
 git clone https://github.com/0xbenc/bash-zoo
 cd bash-zoo
-sudo chmod +x wizard.sh
 ./wizard.sh
 ```
 
