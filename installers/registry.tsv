@@ -6,4 +6,4 @@ share	debian	yes
 uuid	debian	yes
 zapp	debian	no
 zapper	debian	no
-
+forgit	debian,macos	yes
