@@ -13,9 +13,10 @@ brew list oath-toolkit >/dev/null 2>&1 || brew install oath-toolkit
 brew list figlet >/dev/null 2>&1 || brew install figlet
 brew list pass >/dev/null 2>&1 || brew install pass
 brew list git >/dev/null 2>&1 || brew install git
+brew list fzf >/dev/null 2>&1 || brew install fzf
 
 echo "Verifying installations..."
-for cmd in pass oathtool figlet gpg pbcopy; do
+for cmd in pass oathtool figlet fzf gpg pbcopy; do
   if command -v "$cmd" >/dev/null 2>&1; then
     echo "  - $cmd OK"
   else
@@ -25,4 +26,3 @@ for cmd in pass oathtool figlet gpg pbcopy; do
 done
 
 echo "mfa dependencies installed (macOS)."
-

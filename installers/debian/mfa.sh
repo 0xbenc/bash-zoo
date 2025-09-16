@@ -5,10 +5,10 @@ echo "Updating package list..."
 sudo apt update -y
 
 echo "Installing dependencies for mfa (Debian/Ubuntu)..."
-sudo apt install -y pass oathtool figlet git xclip
+sudo apt install -y pass oathtool figlet git xclip fzf
 
 echo "Verifying installations..."
-for cmd in pass oathtool figlet xclip; do
+for cmd in pass oathtool figlet xclip fzf; do
   if command -v "$cmd" >/dev/null 2>&1; then
     echo "  - $cmd OK"
   else
@@ -18,4 +18,3 @@ for cmd in pass oathtool figlet xclip; do
 done
 
 echo "mfa dependencies installed (Debian)."
-

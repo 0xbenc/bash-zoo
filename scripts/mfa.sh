@@ -1,102 +1,336 @@
 #!/bin/bash
 set -euo pipefail
-# macOS Bash 3.2–compatible MFA helper using pass + oathtool + figlet
-# - No mapfile/readarray
-# - No associative arrays
-# - Uses pbcopy on macOS, xclip if present (Linux)
+# Terminal MFA helper with fuzzy selection, clipboard feedback, and countdown.
 
-PASSWORD_STORE_DIR="$HOME/.password-store"
+PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
+TOTP_WINDOW=30
 
-if [[ ! -d "$PASSWORD_STORE_DIR" ]]; then
-  echo "Password store directory '$PASSWORD_STORE_DIR' does not exist."
-  exit 1
-fi
+BOLD=""
+DIM=""
+FG_BLUE=""
+FG_GREEN=""
+FG_YELLOW=""
+FG_MAGENTA=""
+FG_RED=""
+FG_CYAN=""
+FG_WHITE=""
+RESET=""
 
-# Collect matching files safely (handles spaces) into mfa_files[]
-mfa_files=()
-while IFS= read -r -d '' f; do
-  mfa_files+=("$f")
-done < <(find "$PASSWORD_STORE_DIR" -type f \( -name "mfa" -o -name "mfa.gpg" \) -print0)
-
-if [[ ${#mfa_files[@]} -eq 0 ]]; then
-  echo "No MFA files found in '$PASSWORD_STORE_DIR'."
-  exit 1
-fi
-
-# Build parallel arrays (index-based rather than associative)
-pass_entries=()
-display_prefixes=()
-
-for file in "${mfa_files[@]}"; do
-  relpath="${file#$PASSWORD_STORE_DIR/}"
-  pass_entry="${relpath%.gpg}"
-
-  if [[ "$pass_entry" == */mfa ]]; then
-    display_prefix="${pass_entry%/mfa}"
-  elif [[ "$pass_entry" == "mfa" ]]; then
-    display_prefix="(root)"
+if [[ -t 1 ]] && command -v tput >/dev/null 2>&1; then
+  colors="$(tput colors 2>/dev/null || printf '0')"
+  if [[ "$colors" =~ ^[0-9]+$ ]] && [[ "$colors" -ge 8 ]]; then
+    BOLD="$(tput bold 2>/dev/null || printf '')"
+    DIM="$(tput dim 2>/dev/null || printf '')"
+    FG_BLUE="$(tput setaf 4 2>/dev/null || printf '')"
+    FG_GREEN="$(tput setaf 2 2>/dev/null || printf '')"
+    FG_YELLOW="$(tput setaf 3 2>/dev/null || printf '')"
+    FG_MAGENTA="$(tput setaf 5 2>/dev/null || printf '')"
+    FG_RED="$(tput setaf 1 2>/dev/null || printf '')"
+    FG_CYAN="$(tput setaf 6 2>/dev/null || printf '')"
+    FG_WHITE="$(tput setaf 7 2>/dev/null || printf '')"
+    RESET="$(tput sgr0 2>/dev/null || printf '')"
   else
-    display_prefix="$pass_entry"
+    RESET="$(tput sgr0 2>/dev/null || printf '')"
+  fi
+fi
+
+: "${BOLD:=}"
+: "${DIM:=}"
+: "${FG_BLUE:=}"
+: "${FG_GREEN:=}"
+: "${FG_YELLOW:=}"
+: "${FG_MAGENTA:=}"
+: "${FG_RED:=}"
+: "${FG_CYAN:=}"
+: "${FG_WHITE:=}"
+: "${RESET:=}"
+
+pass_entries=()
+display_labels=()
+
+die() {
+  printf '%s%sError:%s %s\n' "$FG_RED" "$BOLD" "$RESET" "$1" >&2
+  exit 1
+}
+
+print_banner() {
+  local total="$1"
+  printf '%s==================== MFA ====================%s\n' "$BOLD$FG_BLUE" "$RESET"
+  printf '%sEntries:%s %s%3d%s\n' "$FG_MAGENTA" "$RESET" "$BOLD" "$total" "$RESET"
+  printf '%sStore:%s %s%s%s\n' "$FG_GREEN" "$RESET" "$FG_BLUE$BOLD" "$PASSWORD_STORE_DIR" "$RESET"
+  if command -v fzf >/dev/null 2>&1; then
+    printf '%sFilter:%s type to search, Enter copies, Esc exits\n' "$FG_CYAN" "$RESET"
+  else
+    printf '%sFilter:%s numbered fallback active (install fzf for fuzzy search)\n' "$FG_YELLOW" "$RESET"
+  fi
+  printf '%s---------------------------------------------------------------%s\n\n' "$DIM" "$RESET"
+}
+
+format_label() {
+  local entry="$1"
+  local label="$entry"
+
+  if [[ "$label" == */mfa ]]; then
+    label="${label%/mfa}"
+  elif [[ "$label" == "mfa" ]]; then
+    label="(root)"
   fi
 
-  pass_entries+=("$pass_entry")
-  display_prefixes+=("$display_prefix")
-done
-
-# Limit to 26 items (a–z). Expand if you need more.
-letters=( {a..z} )
-max=${#pass_entries[@]}
-if (( max > 26 )); then
-  echo "Note: Showing first 26 entries (a–z). You have $max matches."
-  max=26
-fi
-
-echo "Available MFA entries:"
-for ((i=0; i<max; i++)); do
-  echo "  [${letters[$i]}] ${display_prefixes[$i]}"
-done
-
-read -p "Enter the letter corresponding to the MFA you want to generate: " user_choice
-
-# Find the index of the chosen letter
-choice_idx=-1
-for ((i=0; i<max; i++)); do
-  if [[ "$user_choice" == "${letters[$i]}" ]]; then
-    choice_idx=$i
-    break
+  if [[ -z "$label" ]]; then
+    label="(root)"
   fi
-done
 
-if (( choice_idx < 0 )); then
-  echo "Invalid selection. Exiting."
-  exit 1
-fi
+  label="${label//\// > }"
+  printf '%s' "$label"
+}
 
-selected_pass="${pass_entries[$choice_idx]}"
+choose_entry() {
+  local total="$1"
 
-# Generate OTP
-if ! command -v pass >/dev/null 2>&1 || ! command -v oathtool >/dev/null 2>&1; then
-  echo "Missing dependencies: require 'pass' and 'oathtool'." >&2
-  exit 1
-fi
+  if (( total == 1 )); then
+    printf '%sAuto-selecting:%s %s%s%s\n' "$DIM" "$RESET" "$FG_GREEN" "${display_labels[0]}" "$RESET" >&2
+    printf '0'
+    return 0
+  fi
 
-otp="$(oathtool --totp -b "$(pass show "$selected_pass")")"
-if [[ -z "$otp" ]]; then
-  echo "Failed to generate OTP for '$selected_pass'."
-  exit 1
-fi
+  if command -v fzf >/dev/null 2>&1; then
+    local selected_line
+    local prompt pointer marker header
+    printf -v prompt '%s:: ACCESS >%s ' "$BOLD$FG_MAGENTA" "$RESET"
+    pointer='>>'
+    marker='>>'
+    printf -v header '%sList of TOTPs%s\n%sUse :: filter | Enter :: copy | Esc :: abort%s' \
+      "$BOLD$FG_CYAN" "$RESET" "$DIM" "$RESET"
+    if ! selected_line=$( \
+      for ((i=0; i<total; i++)); do
+        local slot
+        slot=$(printf '#%02d' $((i + 1)))
+        printf '%s\t%s%s%s  %s%s%s\t%s%s%s\n' \
+          "$i" \
+          "$BOLD$FG_CYAN" "$slot" "$RESET" \
+          "$FG_BLUE" "${display_labels[$i]}" "$RESET" \
+          "$DIM" "${pass_entries[$i]}" "$RESET"
+      done | fzf --ansi --with-nth=2,3 --delimiter=$'\t' \
+        --prompt "$prompt" --pointer "$pointer" --marker "$marker" \
+        --height=80% --layout=reverse --border --info=inline \
+        --header "$header" --tiebreak=index --no-sort
+    ); then
+      return 1
+    fi
 
-# Copy to clipboard: pbcopy (macOS) or xclip (Linux)
-if command -v pbcopy >/dev/null 2>&1; then
-  printf "%s" "$otp" | pbcopy
-elif command -v xclip >/dev/null 2>&1; then
-  printf "%s" "$otp" | xclip -selection clipboard
-else
-  echo "Warning: No clipboard tool found (pbcopy/xclip). OTP not copied." >&2
-fi
+    printf '%s' "${selected_line%%$'\t'*}"
+    return 0
+  fi
 
-# Pretty print with figlet spacing
-figlet_text="$(printf "%s" "$otp" | sed 's/./& /g; s/ $//')"
+  printf '%sNeon filter offline: presenting classic index grid.%s\n\n' "$FG_YELLOW" "$RESET" >&2
+  local i
+  for ((i=0; i<total; i++)); do
+    printf '  %s[%02d]%s %s%s%s %s%s%s\n' \
+      "$FG_BLUE" $((i + 1)) "$RESET" \
+      "$BOLD$FG_MAGENTA" "${display_labels[$i]}" "$RESET" \
+      "$DIM" "${pass_entries[$i]}" "$RESET" >&2
+  done
 
-echo "OTP for [${letters[$choice_idx]}] (${display_prefixes[$choice_idx]}): copied to clipboard."
-figlet "$figlet_text"
+  local reply
+  while true; do
+    printf '\n%sSelect%s entry [%02d-%02d] (or q to abort): ' \
+      "$FG_CYAN" "$RESET" 1 "$total" >&2
+    IFS= read -r reply
+
+    if [[ "$reply" == "q" || "$reply" == "Q" ]]; then
+      return 1
+    fi
+
+    if [[ "$reply" =~ ^[0-9]+$ ]]; then
+      local idx=$((reply - 1))
+      if (( idx >= 0 && idx < total )); then
+        printf '%s' "$idx"
+        return 0
+      fi
+    fi
+
+    printf '%sEnter a valid index between 1 and %d.%s\n' "$FG_YELLOW" "$total" "$RESET" >&2
+  done
+
+  return 0
+}
+
+format_otp() {
+  local digits="$1"
+  local len=${#digits}
+  local chunk=3
+  local idx=0
+  local result=""
+
+  while (( idx < len )); do
+    local part="${digits:idx:chunk}"
+    if [[ -n "$result" ]]; then
+      result+=" "
+    fi
+    result+="$part"
+    idx=$((idx + chunk))
+  done
+
+  printf '%s' "$result"
+}
+
+render_progress() {
+  local remaining="$1"
+  local step="$2"
+  local width=24
+  local elapsed=$((step - remaining))
+
+  if (( elapsed < 0 )); then
+    elapsed=0
+  elif (( elapsed > step )); then
+    elapsed=$step
+  fi
+
+  local filled=$((elapsed * width / step))
+  local empty=$((width - filled))
+  local filled_bar=""
+  local empty_bar=""
+
+  if (( filled > 0 )); then
+    filled_bar="$(printf '%*s' "$filled" '' | tr ' ' '=')"
+  fi
+  if (( empty > 0 )); then
+    empty_bar="$(printf '%*s' "$empty" '' | tr ' ' '.')"
+  fi
+
+  local color="$FG_GREEN"
+  if (( remaining <= 5 )); then
+    color="$FG_RED"
+  elif (( remaining <= 10 )); then
+    color="$FG_YELLOW"
+  fi
+
+  printf '%s[%s%s%s%s]%s %s%2ds remaining%s\n' \
+    "$DIM" "$FG_CYAN" "$filled_bar" "$DIM" "$empty_bar" "$RESET" "$color" "$remaining" "$RESET"
+}
+
+copy_to_clipboard() {
+  local otp="$1"
+
+  if command -v pbcopy >/dev/null 2>&1; then
+    printf '%s' "$otp" | pbcopy
+    return 0
+  fi
+
+  if command -v wl-copy >/dev/null 2>&1; then
+    printf '%s' "$otp" | wl-copy
+    return 0
+  fi
+
+  if command -v xclip >/dev/null 2>&1; then
+    printf '%s' "$otp" | xclip -selection clipboard
+    return 0
+  fi
+
+  if command -v xsel >/dev/null 2>&1; then
+    printf '%s' "$otp" | xsel --clipboard --input
+    return 0
+  fi
+
+  return 1
+}
+
+show_result() {
+  local label="$1"
+  local entry="$2"
+  local otp="$3"
+  local pretty="$4"
+  local copied="$5"
+
+  if [[ "$copied" -eq 0 ]]; then
+    printf '\n%s%sSuccess:%s Copied new MFA code.%s\n' "$FG_GREEN" "$BOLD" "$RESET" "$RESET"
+  else
+    printf '\n%sNotice:%s MFA code ready (clipboard unavailable).\n' "$FG_YELLOW" "$RESET"
+  fi
+  printf '%sEntry:%s %s%s%s\n' "$DIM" "$RESET" "$FG_BLUE" "$label" "$RESET"
+  printf '%sPass path:%s %s\n\n' "$DIM" "$RESET" "$entry"
+
+  if command -v figlet >/dev/null 2>&1; then
+    local figlet_text
+    figlet_text="$(printf '%s' "$pretty" | sed 's/ /  /g')"
+    printf '%s' "$FG_CYAN"
+    figlet "$figlet_text"
+    printf '%s' "$RESET"
+  else
+    printf '%s%s%s%s\n' "$BOLD" "$FG_CYAN" "$pretty" "$RESET"
+  fi
+
+  local now
+  now=$(date +%s)
+  local modulo=$((now % TOTP_WINDOW))
+  local remaining=$((TOTP_WINDOW - modulo))
+  if (( remaining == 0 )); then
+    remaining=$TOTP_WINDOW
+  fi
+
+  printf '\n'
+  render_progress "$remaining" "$TOTP_WINDOW"
+  printf '\n'
+}
+
+main() {
+  pass_entries=()
+  display_labels=()
+
+  if [[ ! -d "$PASSWORD_STORE_DIR" ]]; then
+    die "Password store directory '$PASSWORD_STORE_DIR' does not exist."
+  fi
+
+  local file
+  while IFS= read -r -d '' file; do
+    local rel="${file#$PASSWORD_STORE_DIR/}"
+    rel="${rel%.gpg}"
+    pass_entries+=("$rel")
+  done < <(find "$PASSWORD_STORE_DIR" -type f \( -name 'mfa' -o -name 'mfa.gpg' \) -print0)
+
+  if [[ ${#pass_entries[@]} -eq 0 ]]; then
+    die "No MFA files found in '$PASSWORD_STORE_DIR'."
+  fi
+
+  local entry
+  for entry in "${pass_entries[@]}"; do
+    display_labels+=("$(format_label "$entry")")
+  done
+
+  local total=${#pass_entries[@]}
+  print_banner "$total"
+
+  local selection
+  if ! selection="$(choose_entry "$total")"; then
+    printf '%sEscape detected. Session closed.%s\n' "$DIM" "$RESET"
+    return 0
+  fi
+
+  local selected_entry="${pass_entries[$selection]}"
+  local selected_label="${display_labels[$selection]}"
+
+  if ! command -v pass >/dev/null 2>&1 || ! command -v oathtool >/dev/null 2>&1; then
+    die "Missing dependencies: require 'pass' and 'oathtool'."
+  fi
+
+  local otp
+  if ! otp="$(oathtool --totp -b "$(pass show "$selected_entry")")"; then
+    die "Failed to generate OTP for '$selected_entry'."
+  fi
+
+  if [[ -z "$otp" ]]; then
+    die "Failed to generate OTP for '$selected_entry'."
+  fi
+
+  local pretty
+  pretty="$(format_otp "$otp")"
+
+  local copy_status=1
+  if copy_to_clipboard "$otp"; then
+    copy_status=0
+  fi
+
+  show_result "$selected_label" "$selected_entry" "$otp" "$pretty" "$copy_status"
+}
+
+main "$@"
