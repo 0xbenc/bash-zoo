@@ -56,14 +56,6 @@ die() {
 print_banner() {
   local total="$1"
   printf '%s==================== MFA ====================%s\n' "$BOLD$FG_BLUE" "$RESET"
-  printf '%sEntries:%s %s%3d%s\n' "$FG_MAGENTA" "$RESET" "$BOLD" "$total" "$RESET"
-  printf '%sStore:%s %s%s%s\n' "$FG_GREEN" "$RESET" "$FG_BLUE$BOLD" "$PASSWORD_STORE_DIR" "$RESET"
-  if command -v fzf >/dev/null 2>&1; then
-    printf '%sFilter:%s type to search, Enter copies, Esc exits\n' "$FG_CYAN" "$RESET"
-  else
-    printf '%sFilter:%s numbered fallback active (install fzf for fuzzy search)\n' "$FG_YELLOW" "$RESET"
-  fi
-  printf '%s---------------------------------------------------------------%s\n\n' "$DIM" "$RESET"
 }
 
 format_label() {
@@ -96,12 +88,12 @@ choose_entry() {
   if command -v fzf >/dev/null 2>&1; then
     local selected_line
     local prompt pointer marker header
-    printf -v prompt '%s:: ACCESS >%s ' "$BOLD$FG_MAGENTA" "$RESET"
-    pointer='>>'
-    marker='>>'
-    printf -v header '%sList of TOTPs%s\n%sUse :: filter | Enter :: copy | Esc :: abort%s' \
-      "$BOLD$FG_CYAN" "$RESET" "$DIM" "$RESET"
-    if ! selected_line=$( \
+    local tmp_input tmp_script
+    tmp_input=$(mktemp "${TMPDIR:-/tmp}/mfa_fzf_input.XXXXXX")
+    tmp_script=$(mktemp "${TMPDIR:-/tmp}/mfa_fzf_order.XXXXXX")
+
+    # Pre-render the list once so we can reuse it for fuzzy and exact passes.
+    {
       for ((i=0; i<total; i++)); do
         local slot
         slot=$(printf '#%02d' $((i + 1)))
@@ -110,14 +102,75 @@ choose_entry() {
           "$BOLD$FG_CYAN" "$slot" "$RESET" \
           "$FG_BLUE" "${display_labels[$i]}" "$RESET" \
           "$DIM" "${pass_entries[$i]}" "$RESET"
-      done | fzf --ansi --with-nth=2,3 --delimiter=$'\t' \
+      done
+    } > "$tmp_input"
+
+    cat <<'SCRIPT' > "$tmp_script"
+#!/bin/bash
+set -euo pipefail
+
+data_file="$1"
+query="${FZF_QUERY-}"
+delimiter=$'\t'
+
+# Treat blank or whitespace-only queries as fuzzy-only.
+if [[ -z "${query//[[:space:]]/}" ]]; then
+  cat "$data_file"
+  exit 0
+fi
+
+exact_lines=""
+if exact_lines=$(fzf --filter "$query" --exact --ansi --nth=2,3 \
+    --delimiter="$delimiter" --no-sort < "$data_file" 2>/dev/null); then
+  :
+else
+  exact_lines=""
+fi
+
+if [[ -z "$exact_lines" ]]; then
+  cat "$data_file"
+  exit 0
+fi
+
+seen=""
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  idx=${line%%"$delimiter"*}
+  seen+=" $idx"
+  printf '%s\n' "$line"
+done <<< "$exact_lines"
+
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  idx=${line%%"$delimiter"*}
+  case " $seen " in
+    *" $idx "*)
+      continue
+      ;;
+  esac
+  printf '%s\n' "$line"
+done < "$data_file"
+SCRIPT
+    chmod +x "$tmp_script"
+
+    printf -v prompt '%s:: Search >%s ' "$BOLD$FG_MAGENTA" "$RESET"
+    pointer='>>'
+    marker='>>'
+    printf -v header '%sList of TOTPs%s\n%sType to filter | Enter to search | Esc to exit%s' \
+      "$BOLD$FG_CYAN" "$RESET" "$DIM" "$RESET"
+
+    if ! selected_line=$( \
+      cat "$tmp_input" | fzf --ansi --with-nth=2,3 --delimiter=$'\t' \
         --prompt "$prompt" --pointer "$pointer" --marker "$marker" \
         --height=80% --layout=reverse --border --info=inline \
-        --header "$header" --tiebreak=index --no-sort
+        --header "$header" --tiebreak=index --no-sort \
+        --bind "change:reload($tmp_script $tmp_input)+first"
     ); then
+      rm -f "$tmp_input" "$tmp_script"
       return 1
     fi
 
+    rm -f "$tmp_input" "$tmp_script"
     printf '%s' "${selected_line%%$'\t'*}"
     return 0
   fi
