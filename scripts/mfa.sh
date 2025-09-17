@@ -45,8 +45,12 @@ fi
 : "${FG_WHITE:=}"
 : "${RESET:=}"
 
+CHOICE_SYMBOLS=(a b d e f g h i j k l m n o p q r s t u v w x y z)
+CHOICE_SYMBOL_COUNT=${#CHOICE_SYMBOLS[@]}
+
 pass_entries=()
 display_labels=()
+choice_keys=()
 
 die() {
   printf '%s%sError:%s %s\n' "$FG_RED" "$BOLD" "$RESET" "$1" >&2
@@ -76,6 +80,25 @@ format_label() {
   printf '%s' "$label"
 }
 
+index_to_choice_key() {
+  local idx="$1"
+  local key=""
+  local remainder
+  local char
+
+  while true; do
+    remainder=$((idx % CHOICE_SYMBOL_COUNT))
+    char="${CHOICE_SYMBOLS[$remainder]}"
+    key="$char$key"
+    idx=$(((idx / CHOICE_SYMBOL_COUNT) - 1))
+    if (( idx < 0 )); then
+      break
+    fi
+  done
+
+  printf '%s' "$key"
+}
+
 choose_entry() {
   local total="$1"
 
@@ -85,27 +108,30 @@ choose_entry() {
     return 0
   fi
 
-  if command -v fzf >/dev/null 2>&1; then
-    local selected_line
-    local prompt pointer marker header
-    local tmp_input tmp_script
-    tmp_input=$(mktemp "${TMPDIR:-/tmp}/mfa_fzf_input.XXXXXX")
-    tmp_script=$(mktemp "${TMPDIR:-/tmp}/mfa_fzf_order.XXXXXX")
+  if ! command -v fzf >/dev/null 2>&1; then
+    die "Missing dependency: require 'fzf'."
+  fi
 
-    # Pre-render the list once so we can reuse it for fuzzy and exact passes.
-    {
-      for ((i=0; i<total; i++)); do
-        local slot
-        slot=$(printf '#%02d' $((i + 1)))
-        printf '%s\t%s%s%s  %s%s%s\t%s%s%s\n' \
-          "$i" \
-          "$BOLD$FG_CYAN" "$slot" "$RESET" \
-          "$FG_BLUE" "${display_labels[$i]}" "$RESET" \
-          "$DIM" "${pass_entries[$i]}" "$RESET"
-      done
-    } > "$tmp_input"
+  local selected_line
+  local prompt pointer marker header
+  local tmp_input tmp_script
+  tmp_input=$(mktemp "${TMPDIR:-/tmp}/mfa_fzf_input.XXXXXX")
+  tmp_script=$(mktemp "${TMPDIR:-/tmp}/mfa_fzf_order.XXXXXX")
 
-    cat <<'SCRIPT' > "$tmp_script"
+  # Pre-render the list once so we can reuse it for fuzzy and exact passes.
+  {
+    for ((i=0; i<total; i++)); do
+      local slot
+      slot="${choice_keys[$i]}"
+      printf '%s\t%s%s%s  %s%s%s\t%s%s%s\n' \
+        "$i" \
+        "$BOLD$FG_CYAN" "$slot" "$RESET" \
+        "$FG_BLUE" "${display_labels[$i]}" "$RESET" \
+        "$DIM" "${pass_entries[$i]}" "$RESET"
+    done
+  } > "$tmp_input"
+
+  cat <<'SCRIPT' > "$tmp_script"
 #!/bin/bash
 set -euo pipefail
 
@@ -151,60 +177,52 @@ while IFS= read -r line; do
   printf '%s\n' "$line"
 done < "$data_file"
 SCRIPT
-    chmod +x "$tmp_script"
+  chmod +x "$tmp_script"
 
-    printf -v prompt '%s:: Search >%s ' "$BOLD$FG_MAGENTA" "$RESET"
-    pointer='>>'
-    marker='>>'
-    printf -v header '%sList of TOTPs%s\n%sType to filter | Enter to search | Esc to exit%s' \
-      "$BOLD$FG_CYAN" "$RESET" "$DIM" "$RESET"
-
-    if ! selected_line=$( \
-      cat "$tmp_input" | fzf --ansi --with-nth=2,3 --delimiter=$'\t' \
-        --prompt "$prompt" --pointer "$pointer" --marker "$marker" \
-        --height=80% --layout=reverse --border --info=inline \
-        --header "$header" --tiebreak=index --no-sort \
-        --bind "change:reload($tmp_script $tmp_input)+first"
-    ); then
-      rm -f "$tmp_input" "$tmp_script"
-      return 1
-    fi
-
-    rm -f "$tmp_input" "$tmp_script"
-    printf '%s' "${selected_line%%$'\t'*}"
-    return 0
-  fi
-
-  printf '%sNeon filter offline: presenting classic index grid.%s\n\n' "$FG_YELLOW" "$RESET" >&2
+  local -a binding_actions=()
   local i
   for ((i=0; i<total; i++)); do
-    printf '  %s[%02d]%s %s%s%s %s%s%s\n' \
-      "$FG_BLUE" $((i + 1)) "$RESET" \
-      "$BOLD$FG_MAGENTA" "${display_labels[$i]}" "$RESET" \
-      "$DIM" "${pass_entries[$i]}" "$RESET" >&2
-  done
-
-  local reply
-  while true; do
-    printf '\n%sSelect%s entry [%02d-%02d] (or q to abort): ' \
-      "$FG_CYAN" "$RESET" 1 "$total" >&2
-    IFS= read -r reply
-
-    if [[ "$reply" == "q" || "$reply" == "Q" ]]; then
-      return 1
+    local key="${choice_keys[$i]}"
+    if [[ ${#key} -ne 1 ]]; then
+      continue
     fi
 
-    if [[ "$reply" =~ ^[0-9]+$ ]]; then
-      local idx=$((reply - 1))
-      if (( idx >= 0 && idx < total )); then
-        printf '%s' "$idx"
-        return 0
-      fi
-    fi
-
-    printf '%sEnter a valid index between 1 and %d.%s\n' "$FG_YELLOW" "$total" "$RESET" >&2
+    local action="ctrl-${key}:first"
+    local steps=$i
+    while (( steps > 0 )); do
+      action+="+down"
+      steps=$((steps - 1))
+    done
+    action+="+accept"
+    binding_actions+=("$action")
   done
 
+  printf -v prompt '%s:: Search >%s ' "$BOLD$FG_MAGENTA" "$RESET"
+  pointer='>>'
+  marker='>>'
+  printf -v header '%sList of TOTPs%s\n%sType to filter | Enter to select | Ctrl+letter to select | Arrows to nav%s' \
+    "$BOLD$FG_CYAN" "$RESET" "$DIM" "$RESET"
+
+  local -a bind_options=()
+  bind_options+=("--bind" "change:reload($tmp_script $tmp_input)+first")
+  if (( ${#binding_actions[@]} > 0 )); then
+    local IFS=,
+    bind_options+=("--bind" "${binding_actions[*]}")
+  fi
+
+  if ! selected_line=$( \
+    fzf --ansi --with-nth=2,3 --delimiter=$'\t' \
+      --prompt "$prompt" --pointer "$pointer" --marker "$marker" \
+      --height=80% --layout=reverse --border --info=inline \
+      --header "$header" --tiebreak=index --no-sort \
+      "${bind_options[@]}" < "$tmp_input"
+  ); then
+    rm -f "$tmp_input" "$tmp_script"
+    return 1
+  fi
+
+  rm -f "$tmp_input" "$tmp_script"
+  printf '%s' "${selected_line%%$'\t'*}"
   return 0
 }
 
@@ -329,6 +347,7 @@ show_result() {
 main() {
   pass_entries=()
   display_labels=()
+  choice_keys=()
 
   if [[ ! -d "$PASSWORD_STORE_DIR" ]]; then
     die "Password store directory '$PASSWORD_STORE_DIR' does not exist."
@@ -351,6 +370,10 @@ main() {
   done
 
   local total=${#pass_entries[@]}
+  local i
+  for ((i=0; i<total; i++)); do
+    choice_keys+=("$(index_to_choice_key "$i")")
+  done
   print_banner "$total"
 
   local selection
