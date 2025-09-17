@@ -2,16 +2,40 @@
 
 set -euo pipefail
 
-# Uninstall aliases added by the Bash Zoo wizard.
+# Uninstall aliases added by the Bash Zoo installer.
 # - Removes installed binaries from stable bin dirs and/or aliases.
 # - Scans ~/.bashrc and ~/.zshrc for alias lines pointing to scripts/*.sh
 # - Lets you interactively select which to remove
 # - Works with enquirer (Node) if available; falls back to a minimal TUI
 
+usage() {
+  echo "Usage: $0 [--all]" >&2
+}
+
+select_all=0
+if [[ $# -gt 0 ]]; then
+  for arg in "$@"; do
+    case "$arg" in
+      --all|-a|all)
+        select_all=1
+        ;;
+      --help|-h)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown argument: $arg" >&2
+        usage
+        exit 1
+        ;;
+    esac
+  done
+fi
+
 SCRIPTS_DIR="$PWD/scripts"
 BIN_DIRS=("$HOME/.local/bin" "$HOME/bin")
 
-# Candidate RC files to scan (wizard writes to one of these)
+# Candidate RC files to scan (installer writes to one of these)
 RC_CANDIDATES=("$HOME/.bashrc" "$HOME/.zshrc")
 
 ensure_enquirer() {
@@ -186,50 +210,55 @@ if [[ ${#item_ids[@]} -eq 0 ]]; then
   exit 0
 fi
 
-# Build selection payload
-payload='{ "title": "Select items to remove", "choices": ['
-for j in "${!item_ids[@]}"; do
-  id="${item_ids[$j]}"
-  label="${item_labels[$j]}"
-  esc_label=$(printf '%s' "$label" | sed 's/"/\\"/g')
-  payload+="{\"name\":\"$id\",\"message\":\"$esc_label\"},"
-done
-payload=${payload%,}
-payload+='] }'
-
 selected_ids=()
-if ensure_enquirer; then
-  while IFS= read -r __sel; do
-    [[ -z "${__sel:-}" ]] && continue
-    selected_ids+=("$__sel")
-  done < <(BZ_PAYLOAD="$payload" NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" node "bin/select.js")
+if [[ $select_all -eq 1 ]]; then
+  echo "Selecting all installed items for removal."
+  selected_ids=("${item_ids[@]}")
 else
-  # Fallback minimal TUI (hjkl)
-  current=0
-  selected=()
-  for _ in "${item_ids[@]}"; do selected+=(0); done
-  draw_menu() {
-    clear
-    echo "Use 'J' and 'K' to move, 'H' to toggle, 'L' to confirm."
-    for j in "${!item_ids[@]}"; do
-      if [[ $j -eq $current ]]; then echo -ne "\e[1;32m> "; else echo -ne "  "; fi
-      if [[ ${selected[j]} -eq 1 ]]; then echo -ne "[✔ ] "; else echo -ne "[ ] "; fi
-      echo -e "${item_labels[$j]}\e[0m"
+  # Build selection payload
+  payload='{ "title": "Select items to remove", "choices": ['
+  for j in "${!item_ids[@]}"; do
+    id="${item_ids[$j]}"
+    label="${item_labels[$j]}"
+    esc_label=$(printf '%s' "$label" | sed 's/"/\\"/g')
+    payload+="{\"name\":\"$id\",\"message\":\"$esc_label\"},"
+  done
+  payload=${payload%,}
+  payload+='] }'
+
+  if ensure_enquirer; then
+    while IFS= read -r __sel; do
+      [[ -z "${__sel:-}" ]] && continue
+      selected_ids+=("$__sel")
+    done < <(BZ_PAYLOAD="$payload" NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" node "bin/select.js")
+  else
+    # Fallback minimal TUI (hjkl)
+    current=0
+    selected=()
+    for _ in "${item_ids[@]}"; do selected+=(0); done
+    draw_menu() {
+      clear
+      echo "Use 'J' and 'K' to move, 'H' to toggle, 'L' to confirm."
+      for j in "${!item_ids[@]}"; do
+        if [[ $j -eq $current ]]; then echo -ne "\e[1;32m> "; else echo -ne "  "; fi
+        if [[ ${selected[j]} -eq 1 ]]; then echo -ne "[✔ ] "; else echo -ne "[ ] "; fi
+        echo -e "${item_labels[$j]}\e[0m"
+      done
+    }
+    while true; do
+      draw_menu
+      read -rsn1 key
+      case "$key" in
+        "k") ((current = (current - 1 + ${#item_ids[@]}) % ${#item_ids[@]})) ;;
+        "j") ((current = (current + 1) % ${#item_ids[@]})) ;;
+        "h") selected[current]=$((1 - selected[current])) ;;
+        "l") break ;;
+      esac
     done
-  }
-  while true; do
-    draw_menu
-    read -rsn1 key
-    case "$key" in
-      "k") ((current = (current - 1 + ${#item_ids[@]}) % ${#item_ids[@]})) ;;
-      "j") ((current = (current + 1) % ${#item_ids[@]})) ;;
-      "h") selected[current]=$((1 - selected[current])) ;;
-      "l") break ;;
-    esac
-  done
-  for j in "${!selected[@]}"; do
-    if [[ ${selected[j]} -eq 1 ]]; then selected_ids+=("${item_ids[$j]}"); fi
-  done
+    for j in "${!selected[@]}"; do
+      if [[ ${selected[j]} -eq 1 ]]; then selected_ids+=("${item_ids[$j]}"); fi
+    done
+  fi
 fi
 
 if [[ ${#selected_ids[@]} -eq 0 ]]; then

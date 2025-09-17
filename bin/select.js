@@ -19,7 +19,7 @@ function requireEnquirer() {
     const req = createRequire(path.join(vendorRoot, 'package.json'));
     return req('enquirer');
   } catch (e) {
-    console.error('Failed to load enquirer. The wizard attempts to auto-install it.');
+    console.error('Failed to load enquirer. The installer attempts to auto-install it.');
     process.exit(1);
   }
 }

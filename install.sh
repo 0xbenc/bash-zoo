@@ -2,6 +2,30 @@
 
 set -euo pipefail
 
+usage() {
+  echo "Usage: $0 [--all]" >&2
+}
+
+select_all=0
+if [[ $# -gt 0 ]]; then
+  for arg in "$@"; do
+    case "$arg" in
+      --all|-a|all)
+        select_all=1
+        ;;
+      --help|-h)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown argument: $arg" >&2
+        usage
+        exit 1
+        ;;
+    esac
+  done
+fi
+
 # Directories
 INSTALLERS_DIR="installers"
 SCRIPTS_DIR="scripts"
@@ -170,78 +194,85 @@ ensure_enquirer() {
 }
 
 # Build JSON payload for the Node-based selector
-payload='{ "title": "Select scripts to install", "choices": ['
-for i in "${!scripts[@]}"; do
-    label="${scripts[i]}"
-    if [[ "${scripts[i]}" == "zapps" ]]; then
-        label="zapps (zapp+zapper)"
-    fi
-    # escape quotes in label just in case
-    esc_label=$(printf '%s' "$label" | sed 's/"/\\"/g')
-    esc_name=$(printf '%s' "${scripts[i]}" | sed 's/"/\\"/g')
-    payload+="{\"name\":\"$esc_name\",\"message\":\"$esc_label\"},"
-done
-# Trim trailing comma and close array
-payload=${payload%,}
-payload+='] }'
-
-# Run the selector; collect selected names (one per line)
-if ensure_enquirer; then
-    selected_names=()
-    # Pass payload in env var to keep stdin/tty free for interactivity
-    while IFS= read -r __sel_line; do
-        [[ -z "${__sel_line:-}" ]] && continue
-        selected_names+=("$__sel_line")
-    done < <(BZ_PAYLOAD="$payload" NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" node "bin/select.js")
+selected_names=()
+if [[ $select_all -eq 1 ]]; then
+    echo "Selecting all available scripts for $OS_TYPE."
+    selected_names=("${scripts[@]}")
 else
-    # Fallback to the original minimal interactivity when Node or enquirer are unavailable
-    selected=()
-    for _ in "${scripts[@]}"; do selected+=(0); done
-    current=0
-    draw_menu() {
-        clear
-        echo "Use 'J' and 'K' to move, 'H' to toggle, 'L' to confirm."
-        echo "Detected platform: $OS_TYPE"
-        for i in "${!scripts[@]}"; do
-            if [[ $i -eq $current ]]; then
-                echo -ne "\e[1;32m> "
-            else
-                echo -ne "  "
-            fi
-
-            if [[ ${selected[i]} -eq 1 ]]; then
-                echo -ne "[✔ ] "
-            else
-                echo -ne "[ ] "
-            fi
-
-            label="${scripts[i]}"
-            if [[ "${scripts[i]}" == "zapps" ]]; then
-                label="zapps (zapp+zapper)"
-            fi
-            echo -e "$label\e[0m"
-        done
-    }
-    while true; do
-        draw_menu
-        read -rsn1 input
-        case "$input" in
-            "k") ((current = (current - 1 + ${#scripts[@]}) % ${#scripts[@]})) ;;
-            "j") ((current = (current + 1) % ${#scripts[@]})) ;;
-            "h") selected[current]=$((1 - selected[current])) ;;
-            "l") break ;;
-        esac
-    done
-    # Convert fallback selections into the same selected_names format
-    selected_names=()
+    payload='{ "title": "Select scripts to install", "choices": ['
     for i in "${!scripts[@]}"; do
-        if [[ ${selected[i]} -eq 1 ]]; then
-            selected_names+=("${scripts[i]}")
+        label="${scripts[i]}"
+        if [[ "${scripts[i]}" == "zapps" ]]; then
+            label="zapps (zapp+zapper)"
         fi
+        # escape quotes in label just in case
+        esc_label=$(printf '%s' "$label" | sed 's/"/\\"/g')
+        esc_name=$(printf '%s' "${scripts[i]}" | sed 's/"/\\"/g')
+        payload+="{\"name\":\"$esc_name\",\"message\":\"$esc_label\"},"
     done
+    # Trim trailing comma and close array
+    payload=${payload%,}
+    payload+='] }'
+
+    # Run the selector; collect selected names (one per line)
+    if ensure_enquirer; then
+        selected_names=()
+        # Pass payload in env var to keep stdin/tty free for interactivity
+        while IFS= read -r __sel_line; do
+            [[ -z "${__sel_line:-}" ]] && continue
+            selected_names+=("$__sel_line")
+        done < <(BZ_PAYLOAD="$payload" NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" node "bin/select.js")
+    else
+        # Fallback to the original minimal interactivity when Node or enquirer are unavailable
+        selected=()
+        for _ in "${scripts[@]}"; do selected+=(0); done
+        current=0
+        draw_menu() {
+            clear
+            echo "Use 'J' and 'K' to move, 'H' to toggle, 'L' to confirm."
+            echo "Detected platform: $OS_TYPE"
+            for i in "${!scripts[@]}"; do
+                if [[ $i -eq $current ]]; then
+                    echo -ne "\e[1;32m> "
+                else
+                    echo -ne "  "
+                fi
+
+                if [[ ${selected[i]} -eq 1 ]]; then
+                    echo -ne "[✔ ] "
+                else
+                    echo -ne "[ ] "
+                fi
+
+                label="${scripts[i]}"
+                if [[ "${scripts[i]}" == "zapps" ]]; then
+                    label="zapps (zapp+zapper)"
+                fi
+                echo -e "$label\e[0m"
+            done
+        }
+        while true; do
+            draw_menu
+            read -rsn1 input
+            case "$input" in
+                "k") ((current = (current - 1 + ${#scripts[@]}) % ${#scripts[@]})) ;;
+                "j") ((current = (current + 1) % ${#scripts[@]})) ;;
+                "h") selected[current]=$((1 - selected[current])) ;;
+                "l") break ;;
+            esac
+        done
+        # Convert fallback selections into the same selected_names format
+        selected_names=()
+        for i in "${!scripts[@]}"; do
+            if [[ ${selected[i]} -eq 1 ]]; then
+                selected_names+=("${scripts[i]}")
+            fi
+        done
+    fi
+
+    clear
 fi
 
-clear
 echo "Installing selected scripts..."
 selected_scripts=()
 

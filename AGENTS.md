@@ -5,7 +5,7 @@
 - `installers/`: Per-OS installers named after each script.
   - `installers/debian/*.sh` (apt-based)
   - `installers/macos/*.sh` (Homebrew)
-- `wizard.sh`: Interactive installer/alias configurator (detects Debian-like Linux vs. macOS).
+- `install.sh`: Interactive installer/alias configurator (detects Debian-like Linux vs. macOS).
 - `README.md`: Usage and platform notes.
 
 ## Coding Style & Naming
@@ -18,6 +18,6 @@
 ## Commit & Pull Requests
 - Messages: short, imperative, and scoped (e.g., `mfa: handle empty store`). Current history favors concise, present-tense summaries.
 - PRs should include:
-  - Purpose and behavior change; commands run to verify (`./wizard.sh`, direct script calls).
+  - Purpose and behavior change; commands run to verify (`./install.sh`, direct script calls).
   - Platform(s) tested and outputs (Debian/macOS).
   - Screenshots/terminal snippets where interactive flows are affected.

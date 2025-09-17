@@ -17,7 +17,7 @@
 ## TL;DR
 
 ```bash
-git clone https://github.com/xbenc/bash-zoo.git && cd bash-zoo && ./wizard.sh
+git clone https://github.com/xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 ```
 
 ## Table of Contents
@@ -42,7 +42,7 @@ git clone https://github.com/xbenc/bash-zoo.git && cd bash-zoo && ./wizard.sh
 ## Why Bash Zoo
 
 - **Curated shortcuts** · Everything is battle-tested for fast terminal workflows.
-- **Zero-boilerplate install** · `wizard.sh` handles dependency checks, per-OS installers, and aliases.
+- **Zero-boilerplate install** · `install.sh` handles dependency checks, per-OS installers, and aliases.
 - **Portable by design** · Scripts are POSIX-friendly Bash and ship with Debian + macOS installers.
 - **Pick-your-pack** · Install individual tools or the whole enclosure — nothing gets forced into your path.
 
@@ -101,18 +101,19 @@ Once the store contains at least one `*/mfa` entry, run `mfa`, fuzzy-search the 
 
 ## Installation
 
-### Option A — Guided wizard (recommended)
+### Option A — Guided installer (recommended)
 
 ```bash
 git clone https://github.com/0xbenc/bash-zoo
 cd bash-zoo
-./wizard.sh
+./install.sh
 ```
 
 - Auto-detects macOS vs. Debian/Ubuntu
 - Shows which tools need additional packages before enabling
 - Groups complementary tools (like the `zapps` pair) for easy onboarding
 - Stores aliases so the commands travel with every new shell session
+- Skip prompts with `./install.sh --all` to install every tool supported on your platform
 
 ### Option B — Manual pick-and-run
 
@@ -133,9 +134,9 @@ cd bash-zoo
 | `uuid` | ⛔️ | ✅ |
 | `zapp` + `zapper` | ⛔️ | ✅ |
 | `forgit` | ✅ | ✅ |
-| `wizard.sh` | ✅ *(Homebrew required for dependencies)* | ✅ *(APT and friends)* |
+| `install.sh` | ✅ *(Homebrew required for dependencies)* | ✅ *(APT and friends)* |
 
-> The wizard gracefully exits on unsupported platforms without touching your system.
+> The installer gracefully exits on unsupported platforms without touching your system.
 
 ## Daily Use
 
@@ -154,15 +155,16 @@ Need a refresher inside the CLI? Run `<tool> --help` or read the source — each
 ```bash
 cd path/to/bash-zoo
 git pull
-./wizard.sh          # Re-run to pick up new tools or dependencies
+./install.sh         # Re-run to pick up new tools or dependencies
 ```
 
-The wizard is idempotent: re-running only tweaks what changed and offers new toys as they land.
+The installer is idempotent: re-running only tweaks what changed and offers new toys as they land.
 
 ## Uninstall
 
 ```bash
 ./uninstall.sh
+./uninstall.sh --all  # remove every Bash Zoo alias and binary in one go
 ```
 
 Then restart your shell so aliases disappear: `exec "$SHELL" -l`.
