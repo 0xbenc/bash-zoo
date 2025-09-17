@@ -13,12 +13,6 @@ preview_show() {
     return 0
   fi
 
-  if declare -F plugins_preview_override >/dev/null; then
-    if plugins_preview_override "$path"; then
-      return 0
-    fi
-  fi
-
   local cache_file mime="" use_image_protocol=0
   cache_file=$(preview_cache_file "$path")
   if [[ ! -d "$path" ]]; then

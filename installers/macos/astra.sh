@@ -12,7 +12,6 @@ brew list jq >/dev/null 2>&1 || brew install jq
 brew list fd >/dev/null 2>&1 || brew install fd
 brew list ripgrep >/dev/null 2>&1 || brew install ripgrep
 brew list bat >/dev/null 2>&1 || brew install bat
-brew list tmux >/dev/null 2>&1 || brew install tmux
 brew list chafa >/dev/null 2>&1 || brew install chafa
 brew list poppler >/dev/null 2>&1 || brew install poppler
 brew list atool >/dev/null 2>&1 || brew install atool

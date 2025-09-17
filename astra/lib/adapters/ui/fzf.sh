@@ -12,9 +12,9 @@ fzf_start() {
 
   while true; do
     local header preview_cmd expect output status key paths=()
-    header=$(fzf_header)
-    preview_cmd="$(printf '%q' "$ASTRA_ROOT/bin/astra") --preview-only {2}"
-    expect="enter,ctrl-m,right,l,left,h,q,ctrl-c,ctrl-e,ctrl-r,ctrl-y,alt-m,ctrl-d,ctrl-b,ctrl-n,ctrl-p,.,ctrl-g,?"
+    header=$(fzf_header_text)
+    preview_cmd="$(printf '%q' "$ASTRA_ROOT/lib/core/preview_with_panel.sh") $(printf '%q' "$ASTRA_ROOT") {2}"
+    expect="enter,ctrl-m,right,l,left,h,ctrl-q,ctrl-c,ctrl-e,ctrl-r,ctrl-y,alt-m,ctrl-d,ctrl-b,ctrl-n,ctrl-p,.,ctrl-g,?"
 
     mapfile -t ASTRA_LAST_LISTING < <(search_list_directory "$ASTRA_CWD" "$ASTRA_SHOW_HIDDEN")
     if [[ ${#ASTRA_LAST_LISTING[@]} -eq 0 ]]; then
@@ -22,9 +22,9 @@ fzf_start() {
     fi
 
     output=$(printf '%s\n' "${ASTRA_LAST_LISTING[@]}" | \
-      fzf --ansi --multi --delimiter=$'\t' --with-nth=1 --expect "$expect" \
-          --header "$header" --preview-window='right:60%' --preview "$preview_cmd" \
-          --bind 'space:toggle') || status=$?
+      FZF_DEFAULT_OPTS='' fzf --ansi --multi --delimiter=$'\t' --with-nth=1 --expect "$expect" \
+          --preview-window='right:60%,border-left' --preview "$preview_cmd" \
+          --bind 'space:toggle' --no-sort --layout=default --header "$header") || status=$?
 
     if [[ ${status:-0} -ne 0 ]]; then
       break
@@ -72,12 +72,8 @@ fzf_start() {
 
     ASTRA_NAV_CHANGED=0
 
-    if plugins_handle_key "$key" "{}"; then
-      continue
-    fi
-
     case "$key" in
-      q|ctrl-c)
+      ctrl-q|ctrl-c)
         break
         ;;
       enter|ctrl-m|right|l)
@@ -133,7 +129,7 @@ fzf_start() {
   done
 }
 
-fzf_header() {
+fzf_header_text() {
   local hidden_status
   if [[ "$ASTRA_SHOW_HIDDEN" == true ]]; then
     hidden_status="hidden:on"
@@ -190,7 +186,7 @@ Key bindings:
   ctrl-g          search
   .               toggle hidden files
   space           toggle selection
-  q               quit
+  ctrl-q          quit
 HELP
   read -r -p "Press Enter to continue" _dummy
 }

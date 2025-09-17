@@ -12,7 +12,6 @@ Usage: astra [options]
   --version        Print version information and exit
   --debug          Enable verbose logging (ASTRA_LOG=debug)
   --config PATH    Use alternate configuration file
-  --layout NAME    Override layout mode (fzf|tmux)
   --preview-only PATH
                    Internal helper used by the UI preview pipeline
 USAGE
@@ -46,16 +45,11 @@ astra_load_modules() {
   # shellcheck disable=SC1091
   source "${LIBDIR}/core/preview.sh"
   # shellcheck disable=SC1091
-  source "${LIBDIR}/core/plugins.sh"
-  # shellcheck disable=SC1091
   source "${LIBDIR}/adapters/ui/fzf.sh"
-  # shellcheck disable=SC1091
-  source "${LIBDIR}/adapters/ui/tmux.sh"
 }
 
 astra_main() {
   local config_override=""
-  local layout_override=""
   local debug_override=0
   local preview_mode=0
   local preview_path=""
@@ -80,14 +74,6 @@ astra_main() {
           return 1
         fi
         config_override="$2"
-        shift 2
-        ;;
-      --layout)
-        if [[ $# -lt 2 ]]; then
-          echo "Missing value for --layout" >&2
-          return 1
-        fi
-        layout_override="$2"
         shift 2
         ;;
       --preview-only)
@@ -117,58 +103,24 @@ astra_main() {
   astra_load_modules
   config_init "$config_override"
   if [[ $preview_mode -eq 1 ]]; then
-    ASTRA_PLUGIN_SUPPRESS_START=1
-    plugins_load
     preview_show "$preview_path"
     return 0
   fi
 
   state_init
-  plugins_load
   tasks_init
 
   trap 'astra_shutdown' EXIT
 
-  if [[ -n "$layout_override" ]]; then
-    case "$layout_override" in
-      tmux)
-        if tmux_available; then
-          tmux_start "$@"
-        else
-          log_warn "tmux layout requested but tmux unavailable; falling back to fzf"
-          fzf_start "$@"
-        fi
-        ;;
-      fzf|*)
-        fzf_start "$@"
-        ;;
-    esac
-    return
-  fi
-
-  local layout
-  layout=$(cfg_get_or_default "ui.layout" "fzf")
-  case "$layout" in
-    tmux)
-      if tmux_available; then
-        tmux_start "$@"
-      else
-        log_warn "Configured layout tmux unavailable; falling back to fzf"
-        fzf_start "$@"
-      fi
-      ;;
-    fzf|*)
-      fzf_start "$@"
-      ;;
-  esac
+  fzf_start "$@"
 }
 
 astra_shutdown() {
   local status=$?
   trap - EXIT
-  plugins_on_exit "$status"
   tasks_shutdown
   state_save
+  return "$status"
 }
 
 disable_builtins() {

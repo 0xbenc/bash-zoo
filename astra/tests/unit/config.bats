@@ -20,10 +20,10 @@ setup_file() {
     source "$LIBDIR/core/log.sh"
     source "$LIBDIR/core/config.sh"
     env_init "$ASTRA_ROOT" "$SHAREDIR"
-    printf '{"ui":{"layout":"tmux"}}' >"$ASTRA_CONFIG_DIR/config.json"
+    printf '{"browser":{"show_hidden":true}}' >"$ASTRA_CONFIG_DIR/config.json"
     config_init ""
-    value=$(cfg_get "ui.layout")
-    [[ "$value" == "tmux" ]]
+    value=$(cfg_get "browser.show_hidden")
+    [[ "$value" == "true" ]]
   '
   [ "$status" -eq 0 ]
 }

@@ -154,10 +154,6 @@ env_resolve_tools() {
   export ASTRA_FD_CMD ASTRA_BAT_CMD ASTRA_JQ_CMD ASTRA_TRASH_CMD
 }
 
-tmux_available() {
-  command -v tmux >/dev/null 2>&1
-}
-
 is_macos() {
   [[ "$ASTRA_OS" == "macos" ]]
 }

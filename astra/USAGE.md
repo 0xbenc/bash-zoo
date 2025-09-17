@@ -1,6 +1,6 @@
 # Astra Usage Guide
 
-Astra is a terminal file manager built on Bash and fzf. This guide walks through the everyday keys, layouts, and customization points.
+Astra is a terminal file manager built on Bash and fzf. This guide walks through the everyday keys and customization points.
 
 ## Launching
 
@@ -18,6 +18,7 @@ By default Astra always opens in the directory you launch it from. To opt into r
 
 - **Left pane**: fzf list of entries in the current directory. Directories show as `[D] name/`, symlinks as `[L] name@`, the parent entry appears as `[↑] ..` when you are not at `/`.
 - **Right pane**: live preview (text via bat, images via chafa/kitty, PDFs via pdftotext, archives/media via helper tools).
+- **Control panel**: a compact shortcut map rendered beneath the preview, aligned with the bottom-right corner.
 - **Header**: absolute working directory plus hidden-file state (`hidden:on|off`).
 
 ## Navigation
@@ -52,17 +53,16 @@ Selections honor multi-select in fzf: use **Space** to tag multiple rows, then t
 
 For content search, use the command palette (upcoming) or run ripgrep manually until that feature lands.
 
-## Configuration & Plugins
+## Configuration
 
 - Config lives at `~/.config/astra/config.json`. It is auto-created from `astra/share/examples/config.json` on first run.
-- Toggle defaults (`browser.show_hidden`, theme selection, history limit) or point `plugins.dir` to a custom folder.
+- Toggle defaults such as `browser.show_hidden`, theme selection, or history limits as needed.
 - To resume where you left off between launches, set `session.resume_last` to `true`. Leave it at `false` (the default) to always honour the current shell directory.
-- Sample plugin located in `astra/share/examples/plugin.sample.sh`; copy to your plugins directory to experiment with preview overrides or custom actions.
 
 ## Tips
 
 - Missing preview helpers (bat, chafa, pdftotext, ffprobe) show inline hints. Install using `installers/debian/astra.sh` or `installers/macos/astra.sh` for full fidelity.
 - State (history, last directory) persists in `${XDG_STATE_HOME:-~/.local/state}/astra/state.json`. Delete it if you want a reset.
-- Use `ASTRA_LOG_LEVEL=debug astra` when debugging key handling or plugin hooks.
+- Use `ASTRA_LOG_LEVEL=debug astra` when debugging key handling or preview issues.
 
 Enjoy exploring — feedback on workflows or additional bindings is welcome.

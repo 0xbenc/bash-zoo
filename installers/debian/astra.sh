@@ -3,7 +3,7 @@ set -euo pipefail
 
 sudo apt update -y
 
-sudo apt install -y bash fzf jq fd-find ripgrep bat tmux chafa poppler-utils atool ffmpeg trash-cli
+sudo apt install -y bash fzf jq fd-find ripgrep bat chafa poppler-utils atool ffmpeg trash-cli
 
 # Ensure fd is accessible as `fd`
 if ! command -v fd >/dev/null 2>&1; then

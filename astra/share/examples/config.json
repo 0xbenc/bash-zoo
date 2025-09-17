@@ -1,6 +1,5 @@
 {
   "ui": {
-    "layout": "fzf",
     "theme": "default"
   },
   "browser": {
@@ -20,9 +19,5 @@
     "delete": {
       "use_trash": true
     }
-  },
-  "plugins": {
-    "enabled": true,
-    "dir": "~/.config/astra/plugins"
   }
 }

@@ -51,7 +51,7 @@ git clone https://github.com/xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 
 | Script | Superpower | Platforms | Extra Packages |
 | --- | --- | --- | --- |
-| `astra` | Terminal file manager with fuzzy search, previews, and plugins | macOS, Debian/Ubuntu | `bash`, `fzf`, `jq`, `fd`/`fd-find`, `ripgrep`, `bat`, `tmux`, `chafa`, `poppler-utils`, `atool` |
+| `astra` | Terminal file manager with fuzzy search and previews | macOS, Debian/Ubuntu | `bash`, `fzf`, `jq`, `fd`/`fd-find`, `ripgrep`, `bat`, `chafa`, `poppler-utils`, `atool` |
 | `mfa` | Generate TOTP codes from `pass` and copy them to your clipboard | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
 | `share` | Secure one-time file, folder, or clipboard transfer through a relay | Debian/Ubuntu | `curl`, `openssl`, `socat` |
 | `uuid` | Create and copy a fresh UUID without leaving the terminal | Debian/Ubuntu | `xclip` |
@@ -63,7 +63,7 @@ git clone https://github.com/xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 
 ### astra
 
-`astra` is a Bash-first terminal file manager that wraps `fzf`, `fd`, and `ripgrep` to stay fast while remaining approachable. The standalone UI streams directory listings through `fzf` with a live preview pane powered by `bat`, `chafa`, `pdftotext`, and friends. Core features include one-keystroke navigation, batch file operations, JSON-based configuration, and a lightweight plugin system that lets you override previews or register custom actions. Headline keys: `Enter`/`→` to descend, `←`/`h` or the `[↑] ..` row to walk up, `.` to toggle hidden files, `Ctrl-G` for fuzzy name search, `Ctrl-Y` copy, `Alt-M` move, `Ctrl-D` delete, `Space` to tag multiple rows. See `astra/USAGE.md` for the full walkthrough. macOS and Debian users get the same code path; the installers pull in Homebrew or APT dependencies so previews “just work.”
+`astra` is a Bash-first terminal file manager that wraps `fzf`, `fd`, and `ripgrep` to stay fast while remaining approachable. The standalone UI streams directory listings through `fzf` with a live preview pane powered by `bat`, `chafa`, `pdftotext`, and friends. A static control panel now anchors to the bottom-right beneath the preview so shortcuts stay visible without crowding results. Core features include one-keystroke navigation, batch file operations, and JSON-based configuration. Headline keys: `Enter`/`→` to descend, `←`/`h` or the `[↑] ..` row to walk up, `.` to toggle hidden files, `Ctrl-G` for fuzzy name search, `Ctrl-Y` copy, `Alt-M` move, `Ctrl-D` delete, `Space` to tag multiple rows. See `astra/USAGE.md` for the full walkthrough. macOS and Debian users get the same code path; the installers pull in Homebrew or APT dependencies so previews “just work.”
 
 ### forgit
 
