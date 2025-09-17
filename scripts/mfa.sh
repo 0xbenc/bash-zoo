@@ -57,11 +57,6 @@ die() {
   exit 1
 }
 
-print_banner() {
-  local total="$1"
-  printf '%s==================== MFA ====================%s\n' "$BOLD$FG_BLUE" "$RESET"
-}
-
 format_label() {
   local entry="$1"
   local label="$entry"
@@ -374,7 +369,6 @@ main() {
   for ((i=0; i<total; i++)); do
     choice_keys+=("$(index_to_choice_key "$i")")
   done
-  print_banner "$total"
 
   local selection
   if ! selection="$(choose_entry "$total")"; then
