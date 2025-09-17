@@ -61,6 +61,7 @@ fi
 # Read registry and build candidate list for this OS
 scripts=()
 scripts_has_deps=()
+install_astra_assets=0
 
 while IFS=$'\t' read -r name oses has_deps _rest; do
     # skip comments and empty lines
@@ -333,6 +334,9 @@ for i in "${!scripts[@]}"; do
                 done
             else
                 selected_scripts+=("$script_name")
+                if [[ "$script_name" == "astra" ]]; then
+                    install_astra_assets=1
+                fi
                 chmod +x "$SCRIPTS_DIR/$script_name.sh"
                 if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
                     install_with_installer "$script_name" "$OS_TYPE" || true
@@ -354,6 +358,42 @@ resolve_target_dir() {
         printf '%s\n' "$HOME/bin"
     fi
 }
+
+resolve_share_root() {
+    if [[ "$OS_TYPE" == "macos" ]]; then
+        printf '%s\n' "$HOME/Library/Application Support/bash-zoo"
+    else
+        printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/bash-zoo"
+    fi
+}
+
+install_astra_runtime() {
+    local share_root dest src
+    share_root=$(resolve_share_root)
+    src="$PWD/astra"
+    dest="$share_root/astra"
+
+    if [[ -z "$share_root" || -z "$dest" ]]; then
+        echo "Error: invalid Astra runtime target" >&2
+        return 1
+    fi
+
+    mkdir -p "$share_root"
+    rm -rf "$dest"
+    mkdir -p "$dest"
+
+    cp -R "$src/bin" "$dest/"
+    cp -R "$src/lib" "$dest/"
+    cp -R "$src/share" "$dest/"
+
+    chmod +x "$dest/bin/astra" 2>/dev/null || true
+
+    echo "Installed Astra runtime to $dest"
+}
+
+if [[ $install_astra_assets -eq 1 ]]; then
+    install_astra_runtime || true
+fi
 
 ensure_dir() {
     local dir="$1"
@@ -408,6 +448,47 @@ install_file() {
     chmod +x "$dst" 2>/dev/null || true
 }
 
+install_astra_launcher() {
+    local dst_dir="$1"
+    local mode="$2"
+    local dst="$dst_dir/astra"
+    local share_root repo_script runtime_root runtime_bin
+
+    share_root=$(resolve_share_root)
+    runtime_root="$share_root/astra"
+    runtime_bin="$runtime_root/bin/astra"
+    repo_script="$PWD/$SCRIPTS_DIR/astra.sh"
+
+    if [[ "$mode" == "symlink" ]]; then
+        ln -sf "$runtime_bin" "$dst" 2>/dev/null || return 1
+    else
+        local escaped_repo escaped_runtime
+        escaped_repo=$(printf '%q' "$repo_script")
+        escaped_runtime=$(printf '%q' "$runtime_bin")
+        cat > "$dst" <<EOF
+#!/bin/bash
+set -euo pipefail
+
+ASTRA_RUNTIME=$escaped_runtime
+ASTRA_FALLBACK=$escaped_repo
+
+if [[ -x "\$ASTRA_RUNTIME" ]]; then
+  exec "\$ASTRA_RUNTIME" "\$@"
+fi
+
+if [[ -x "\$ASTRA_FALLBACK" ]]; then
+  exec "\$ASTRA_FALLBACK" "\$@"
+fi
+
+cat >&2 <<'ERR'
+astra: runtime not found. Re-run ./install.sh (select astra) after pulling latest assets.
+ERR
+exit 1
+EOF
+    fi
+    chmod +x "$dst" 2>/dev/null || true
+}
+
 # Perform installation: prefer bin dir, fallback to aliases per-script
 if [[ ${#selected_scripts[@]} -gt 0 ]]; then
     USER_SHELL=$(basename "${SHELL:-}")
@@ -429,6 +510,17 @@ if [[ ${#selected_scripts[@]} -gt 0 ]]; then
 
     if ensure_dir "$target_dir" && is_writable_dir "$target_dir"; then
         for script in "${selected_scripts[@]}"; do
+            if [[ "$script" == "astra" ]]; then
+                if install_astra_launcher "$target_dir" "$install_mode"; then
+                    installed_to_bin+=("$script")
+                else
+                    src="$PWD/$SCRIPTS_DIR/$script.sh"
+                    add_or_update_alias "$script" "$src" "$RC_FILE"
+                    installed_as_alias+=("$script")
+                fi
+                continue
+            fi
+
             src="$PWD/$SCRIPTS_DIR/$script.sh"
             if install_file "$src" "$target_dir" "$script" "$install_mode"; then
                 installed_to_bin+=("$script")

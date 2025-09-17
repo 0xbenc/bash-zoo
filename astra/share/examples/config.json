@@ -1,0 +1,28 @@
+{
+  "ui": {
+    "layout": "fzf",
+    "theme": "default"
+  },
+  "browser": {
+    "show_hidden": false,
+    "sort": {
+      "mode": "name",
+      "reverse": false
+    }
+  },
+  "history": {
+    "limit": 500
+  },
+  "session": {
+    "resume_last": false
+  },
+  "actions": {
+    "delete": {
+      "use_trash": true
+    }
+  },
+  "plugins": {
+    "enabled": true,
+    "dir": "~/.config/astra/plugins"
+  }
+}

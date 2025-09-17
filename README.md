@@ -25,6 +25,7 @@ git clone https://github.com/xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 - [Why Bash Zoo](#why-bash-zoo)
 - [Tools at a Glance](#tools-at-a-glance)
 - [Tool Details](#tool-details)
+  - [astra](#astra)
   - [forgit](#forgit)
   - [share](#share)
   - [uuid](#uuid)
@@ -50,6 +51,7 @@ git clone https://github.com/xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 
 | Script | Superpower | Platforms | Extra Packages |
 | --- | --- | --- | --- |
+| `astra` | Terminal file manager with fuzzy search, previews, and plugins | macOS, Debian/Ubuntu | `bash`, `fzf`, `jq`, `fd`/`fd-find`, `ripgrep`, `bat`, `tmux`, `chafa`, `poppler-utils`, `atool` |
 | `mfa` | Generate TOTP codes from `pass` and copy them to your clipboard | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
 | `share` | Secure one-time file, folder, or clipboard transfer through a relay | Debian/Ubuntu | `curl`, `openssl`, `socat` |
 | `uuid` | Create and copy a fresh UUID without leaving the terminal | Debian/Ubuntu | `xclip` |
@@ -58,6 +60,10 @@ git clone https://github.com/xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 | `forgit` | Scan directories for Git repos needing commits or pushes | macOS, Debian/Ubuntu | `git` |
 
 ## Tool Details
+
+### astra
+
+`astra` is a Bash-first terminal file manager that wraps `fzf`, `fd`, and `ripgrep` to stay fast while remaining approachable. The standalone UI streams directory listings through `fzf` with a live preview pane powered by `bat`, `chafa`, `pdftotext`, and friends. Core features include one-keystroke navigation, batch file operations, JSON-based configuration, and a lightweight plugin system that lets you override previews or register custom actions. Headline keys: `Enter`/`→` to descend, `←`/`h` or the `[↑] ..` row to walk up, `.` to toggle hidden files, `Ctrl-G` for fuzzy name search, `Ctrl-Y` copy, `Alt-M` move, `Ctrl-D` delete, `Space` to tag multiple rows. See `astra/USAGE.md` for the full walkthrough. macOS and Debian users get the same code path; the installers pull in Homebrew or APT dependencies so previews “just work.”
 
 ### forgit
 
@@ -129,6 +135,7 @@ cd bash-zoo
 
 | Feature | macOS | Debian / Ubuntu |
 | --- | --- | --- |
+| `astra` | ✅ *(Homebrew bash + deps required)* | ✅ |
 | `mfa` | ✅ | ✅ |
 | `share` | ⛔️ | ✅ |
 | `uuid` | ⛔️ | ✅ |
@@ -146,6 +153,7 @@ After installation, reload your shell (`exec "$SHELL" -l`) or open a fresh termi
 mfa work/email        # Copy a TOTP token from pass
 share send ./build    # Turn a folder into a one-time drop
 forgit                # Audit every git repo under the current directory
+astra                 # Launch the fuzzy-driven file manager in the current directory
 ```
 
 Need a refresher inside the CLI? Run `<tool> --help` or read the source — each script is tiny and documented inline.

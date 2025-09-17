@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ASTRA_VERSION="0.1.0"
+
+astra_usage() {
+  cat <<'USAGE'
+astra - next-gen terminal file manager
+
+Usage: astra [options]
+  --help           Show this help and exit
+  --version        Print version information and exit
+  --debug          Enable verbose logging (ASTRA_LOG=debug)
+  --config PATH    Use alternate configuration file
+  --layout NAME    Override layout mode (fzf|tmux)
+  --preview-only PATH
+                   Internal helper used by the UI preview pipeline
+USAGE
+}
+
+# Resolve library directory relative to this script unless caller overrides LIBDIR
+ASTRA_ROOT="${ASTRA_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+LIBDIR="${LIBDIR:-${ASTRA_ROOT}/lib}"
+SHAREDIR="${SHAREDIR:-${ASTRA_ROOT}/share}"
+
+# shellcheck disable=SC1091
+source "${LIBDIR}/core/env.sh"
+
+astra_load_modules() {
+  if [[ -n "${ASTRA_MODULES_LOADED:-}" ]]; then
+    return
+  fi
+  ASTRA_MODULES_LOADED=1
+  # shellcheck disable=SC1091
+  source "${LIBDIR}/core/log.sh"
+  # shellcheck disable=SC1091
+  source "${LIBDIR}/core/config.sh"
+  # shellcheck disable=SC1091
+  source "${LIBDIR}/core/state.sh"
+  # shellcheck disable=SC1091
+  source "${LIBDIR}/core/actions.sh"
+  # shellcheck disable=SC1091
+  source "${LIBDIR}/core/search.sh"
+  # shellcheck disable=SC1091
+  source "${LIBDIR}/core/tasks.sh"
+  # shellcheck disable=SC1091
+  source "${LIBDIR}/core/preview.sh"
+  # shellcheck disable=SC1091
+  source "${LIBDIR}/core/plugins.sh"
+  # shellcheck disable=SC1091
+  source "${LIBDIR}/adapters/ui/fzf.sh"
+  # shellcheck disable=SC1091
+  source "${LIBDIR}/adapters/ui/tmux.sh"
+}
+
+astra_main() {
+  local config_override=""
+  local layout_override=""
+  local debug_override=0
+  local preview_mode=0
+  local preview_path=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --help|-h)
+        astra_usage
+        return 0
+        ;;
+      --version|-V)
+        echo "astra ${ASTRA_VERSION}"
+        return 0
+        ;;
+      --debug)
+        debug_override=1
+        shift
+        ;;
+      --config)
+        if [[ $# -lt 2 ]]; then
+          echo "Missing value for --config" >&2
+          return 1
+        fi
+        config_override="$2"
+        shift 2
+        ;;
+      --layout)
+        if [[ $# -lt 2 ]]; then
+          echo "Missing value for --layout" >&2
+          return 1
+        fi
+        layout_override="$2"
+        shift 2
+        ;;
+      --preview-only)
+        if [[ $# -lt 2 ]]; then
+          echo "Missing path for --preview-only" >&2
+          return 1
+        fi
+        preview_mode=1
+        preview_path="$2"
+        shift 2
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  if [[ $debug_override -eq 1 ]]; then
+    export ASTRA_LOG_LEVEL="debug"
+  fi
+
+  env_init "$ASTRA_ROOT" "$SHAREDIR"
+  astra_load_modules
+  config_init "$config_override"
+  if [[ $preview_mode -eq 1 ]]; then
+    ASTRA_PLUGIN_SUPPRESS_START=1
+    plugins_load
+    preview_show "$preview_path"
+    return 0
+  fi
+
+  state_init
+  plugins_load
+  tasks_init
+
+  trap 'astra_shutdown' EXIT
+
+  if [[ -n "$layout_override" ]]; then
+    case "$layout_override" in
+      tmux)
+        if tmux_available; then
+          tmux_start "$@"
+        else
+          log_warn "tmux layout requested but tmux unavailable; falling back to fzf"
+          fzf_start "$@"
+        fi
+        ;;
+      fzf|*)
+        fzf_start "$@"
+        ;;
+    esac
+    return
+  fi
+
+  local layout
+  layout=$(cfg_get_or_default "ui.layout" "fzf")
+  case "$layout" in
+    tmux)
+      if tmux_available; then
+        tmux_start "$@"
+      else
+        log_warn "Configured layout tmux unavailable; falling back to fzf"
+        fzf_start "$@"
+      fi
+      ;;
+    fzf|*)
+      fzf_start "$@"
+      ;;
+  esac
+}
+
+astra_shutdown() {
+  local status=$?
+  trap - EXIT
+  plugins_on_exit "$status"
+  tasks_shutdown
+  state_save
+}
+
+disable_builtins() {
+  # Guard against locale issues
+  export LC_ALL="${LC_ALL:-C.UTF-8}"
+}
+
+disable_builtins
+astra_main "$@"
