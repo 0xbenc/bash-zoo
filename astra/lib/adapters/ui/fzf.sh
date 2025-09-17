@@ -4,6 +4,31 @@ set -Eeuo pipefail
 
 declare -ag ASTRA_LAST_LISTING=()
 
+fzf_capture_terminal_size() {
+  local size lines cols
+  if size=$(stty size 2>/dev/null); then
+    lines=${size% *}
+    cols=${size#* }
+  elif command -v tput >/dev/null 2>&1; then
+    lines=$(tput lines 2>/dev/null || echo 0)
+    cols=$(tput cols 2>/dev/null || echo 0)
+  else
+    lines=${LINES:-0}
+    cols=${COLUMNS:-0}
+  fi
+
+  if [[ -z "$lines" || "$lines" == 0 ]]; then
+    lines=24
+  fi
+  if [[ -z "$cols" || "$cols" == 0 ]]; then
+    cols=80
+  fi
+
+  ASTRA_TTY_LINES="$lines"
+  ASTRA_TTY_COLS="$cols"
+  export ASTRA_TTY_LINES ASTRA_TTY_COLS
+}
+
 fzf_controls_footer() {
   local line1 line2 reset
   reset=$'\033[0m'
@@ -20,6 +45,7 @@ fzf_start() {
 
   while true; do
     local header preview_cmd expect output status key paths=()
+    fzf_capture_terminal_size
     header=$(fzf_header_text)
     preview_cmd="$(printf '%q' "$ASTRA_ROOT/bin/astra") --preview-only {2}"
     expect="enter,ctrl-m,right,l,left,h,ctrl-q,ctrl-c,ctrl-e,ctrl-r,ctrl-y,alt-m,ctrl-d,ctrl-b,ctrl-n,ctrl-p,.,ctrl-g,?"
