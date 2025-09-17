@@ -4,6 +4,14 @@ set -Eeuo pipefail
 
 declare -ag ASTRA_LAST_LISTING=()
 
+fzf_controls_footer() {
+  local line1 line2 reset
+  reset=$'\033[0m'
+  line1=$'\033[7m ^G Search  ^E Edit    ^Y Copy   Alt-M Move  ^D Delete  ^P Props  \033[0m'
+  line2=$'\033[7m Enter Open  Left/h Up  Space Select  . Hidden  ^B Mkdir  ^N New  ^Q Quit \033[0m'
+  printf '%s\n%s%s' "$line1" "$line2" "$reset"
+}
+
 fzf_start() {
   if ! command -v fzf >/dev/null 2>&1; then
     echo "astra: fzf is required" >&2
@@ -13,7 +21,7 @@ fzf_start() {
   while true; do
     local header preview_cmd expect output status key paths=()
     header=$(fzf_header_text)
-    preview_cmd="$(printf '%q' "$ASTRA_ROOT/lib/core/preview_with_panel.sh") $(printf '%q' "$ASTRA_ROOT") {2}"
+    preview_cmd="$(printf '%q' "$ASTRA_ROOT/bin/astra") --preview-only {2}"
     expect="enter,ctrl-m,right,l,left,h,ctrl-q,ctrl-c,ctrl-e,ctrl-r,ctrl-y,alt-m,ctrl-d,ctrl-b,ctrl-n,ctrl-p,.,ctrl-g,?"
 
     mapfile -t ASTRA_LAST_LISTING < <(search_list_directory "$ASTRA_CWD" "$ASTRA_SHOW_HIDDEN")
@@ -21,10 +29,15 @@ fzf_start() {
       ASTRA_LAST_LISTING=($'\t')
     fi
 
+    local footer_opts=()
+    if [[ -t 1 ]]; then
+      footer_opts=(--footer "$(fzf_controls_footer)" --footer-border=none)
+    fi
+
     output=$(printf '%s\n' "${ASTRA_LAST_LISTING[@]}" | \
       FZF_DEFAULT_OPTS='' fzf --ansi --multi --delimiter=$'\t' --with-nth=1 --expect "$expect" \
           --preview-window='right:60%,border-left' --preview "$preview_cmd" \
-          --bind 'space:toggle' --no-sort --layout=default --header "$header") || status=$?
+          --bind 'space:toggle' --no-sort --layout=default "${footer_opts[@]}" --header "$header") || status=$?
 
     if [[ ${status:-0} -ne 0 ]]; then
       break
@@ -127,6 +140,7 @@ fzf_start() {
         ;;
     esac
   done
+
 }
 
 fzf_header_text() {

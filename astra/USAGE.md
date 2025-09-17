@@ -18,7 +18,7 @@ By default Astra always opens in the directory you launch it from. To opt into r
 
 - **Left pane**: fzf list of entries in the current directory. Directories show as `[D] name/`, symlinks as `[L] name@`, the parent entry appears as `[↑] ..` when you are not at `/`.
 - **Right pane**: live preview (text via bat, images via chafa/kitty, PDFs via pdftotext, archives/media via helper tools).
-- **Control panel**: a compact shortcut map rendered beneath the preview, aligned with the bottom-right corner.
+- **Bottom bar**: a nano-style shortcut strip fixed to the bottom of the terminal.
 - **Header**: absolute working directory plus hidden-file state (`hidden:on|off`).
 
 ## Navigation
