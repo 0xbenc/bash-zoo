@@ -7,6 +7,9 @@ if ! command -v brew >/dev/null 2>&1; then
 fi
 
 brew list bash >/dev/null 2>&1 || brew install bash
+if brew outdated bash >/dev/null 2>&1; then
+  brew upgrade bash
+fi
 brew list fzf >/dev/null 2>&1 || brew install fzf
 brew list jq >/dev/null 2>&1 || brew install jq
 brew list fd >/dev/null 2>&1 || brew install fd
@@ -22,10 +25,21 @@ BREW_BASH=""
 if brew info bash >/dev/null 2>&1; then
   BREW_BASH="$(brew --prefix bash)/bin/bash"
 fi
+
 if [[ -n "$BREW_BASH" && -x "$BREW_BASH" ]]; then
+  if ! "$BREW_BASH" -c '(( BASH_VERSINFO[0] >= 5 ))' >/dev/null 2>&1; then
+    echo "Homebrew bash at $BREW_BASH did not report version >= 5" >&2
+    exit 1
+  fi
+
   if ! grep -q "$BREW_BASH" /etc/shells; then
     echo "$BREW_BASH" | sudo tee -a /etc/shells >/dev/null
   fi
+
+  echo "Homebrew bash ready at $BREW_BASH"
+else
+  echo "Homebrew bash missing after installation. Check brew setup." >&2
+  exit 1
 fi
 
 echo "astra dependencies installed (macOS)."

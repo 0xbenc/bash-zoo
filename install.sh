@@ -391,6 +391,49 @@ install_astra_runtime() {
     echo "Installed Astra runtime to $dest"
 }
 
+astra_detect_modern_bash() {
+    local candidates=()
+    local candidate
+
+    if [[ -n "${ASTRA_PREFERRED_BASH:-}" ]]; then
+        candidates+=("$ASTRA_PREFERRED_BASH")
+    fi
+
+    if command -v brew >/dev/null 2>&1; then
+        if candidate=$(brew --prefix bash 2>/dev/null); then
+            if [[ -n "$candidate" && -x "$candidate/bin/bash" ]]; then
+                candidates+=("$candidate/bin/bash")
+            fi
+        fi
+    fi
+
+    if [[ -x "/opt/homebrew/bin/bash" ]]; then
+        candidates+=("/opt/homebrew/bin/bash")
+    fi
+
+    if [[ -x "/usr/local/bin/bash" ]]; then
+        candidates+=("/usr/local/bin/bash")
+    fi
+
+    if command -v bash >/dev/null 2>&1; then
+        candidate=$(command -v bash)
+        if [[ -n "$candidate" ]]; then
+            candidates+=("$candidate")
+        fi
+    fi
+
+    for candidate in "${candidates[@]}"; do
+        if [[ -x "$candidate" ]]; then
+            if "$candidate" -c '(( BASH_VERSINFO[0] >= 5 ))' >/dev/null 2>&1; then
+                printf '%s\n' "$candidate"
+                return 0
+            fi
+        fi
+    done
+
+    return 1
+}
+
 if [[ $install_astra_assets -eq 1 ]]; then
     install_astra_runtime || true
 fi
@@ -453,31 +496,105 @@ install_astra_launcher() {
     local mode="$2"
     local dst="$dst_dir/astra"
     local share_root repo_script runtime_root runtime_bin
+    local preferred_bash=""
 
     share_root=$(resolve_share_root)
     runtime_root="$share_root/astra"
     runtime_bin="$runtime_root/bin/astra"
     repo_script="$PWD/$SCRIPTS_DIR/astra.sh"
 
-    if [[ "$mode" == "symlink" ]]; then
-        ln -sf "$runtime_bin" "$dst" 2>/dev/null || return 1
+    if preferred_bash=$(astra_detect_modern_bash 2>/dev/null); then
+        :
     else
-        local escaped_repo escaped_runtime
-        escaped_repo=$(printf '%q' "$repo_script")
-        escaped_runtime=$(printf '%q' "$runtime_bin")
-        cat > "$dst" <<EOF
+        preferred_bash=""
+    fi
+
+    local escaped_repo escaped_runtime escaped_preferred
+    escaped_repo=$(printf '%q' "$repo_script")
+    escaped_runtime=$(printf '%q' "$runtime_bin")
+    escaped_preferred=$(printf '%q' "$preferred_bash")
+
+    if [[ "$mode" == "symlink" ]]; then
+        echo "Astra requires a launcher wrapper; creating script instead of symlink." >&2
+    fi
+
+    cat > "$dst" <<EOF
 #!/bin/bash
 set -euo pipefail
 
 ASTRA_RUNTIME=$escaped_runtime
 ASTRA_FALLBACK=$escaped_repo
+ASTRA_PREFERRED_BASH=$escaped_preferred
+
+if [[ -n "\$ASTRA_PREFERRED_BASH" ]]; then
+  export ASTRA_PREFERRED_BASH
+fi
+
+astra_find_modern_bash() {
+  local candidates=()
+  local candidate
+
+  if [[ -n "\$ASTRA_PREFERRED_BASH" ]]; then
+    candidates+=("\$ASTRA_PREFERRED_BASH")
+  fi
+
+  if [[ -x "/opt/homebrew/bin/bash" ]]; then
+    candidates+=("/opt/homebrew/bin/bash")
+  fi
+
+  if [[ -x "/usr/local/bin/bash" ]]; then
+    candidates+=("/usr/local/bin/bash")
+  fi
+
+  if command -v brew >/dev/null 2>&1; then
+    candidate="\$(brew --prefix bash 2>/dev/null)"
+    if [[ -n "\$candidate" && -x "\$candidate/bin/bash" ]]; then
+      candidates+=("\$candidate/bin/bash")
+    fi
+  fi
+
+  if command -v bash >/dev/null 2>&1; then
+    candidate="\$(command -v bash)"
+    if [[ -n "\$candidate" ]]; then
+      candidates+=("\$candidate")
+    fi
+  fi
+
+  local item
+  for item in "\${candidates[@]}"; do
+    if [[ -x "\$item" ]]; then
+      if "\$item" -c '(( BASH_VERSINFO[0] >= 5 ))' >/dev/null 2>&1; then
+        printf '%s\n' "\$item"
+        return 0
+      fi
+    fi
+  done
+
+  return 1
+}
+
+astra_launch() {
+  local script="\$1"
+  shift
+
+  if [[ ! -x "\$script" ]]; then
+    return 1
+  fi
+
+  local modern_bash
+  if modern_bash="\$(astra_find_modern_bash)"; then
+    exec "\$modern_bash" "\$script" "\$@"
+  fi
+
+  exec "\$script" "\$@"
+}
 
 if [[ -x "\$ASTRA_RUNTIME" ]]; then
-  exec "\$ASTRA_RUNTIME" "\$@"
+  astra_launch "\$ASTRA_RUNTIME" "\$@"
 fi
 
 if [[ -x "\$ASTRA_FALLBACK" ]]; then
-  exec "\$ASTRA_FALLBACK" "\$@"
+  astra_launch "\$ASTRA_FALLBACK" "\$@"
 fi
 
 cat >&2 <<'ERR'
@@ -485,7 +602,6 @@ astra: runtime not found. Re-run ./install.sh (select astra) after pulling lates
 ERR
 exit 1
 EOF
-    fi
     chmod +x "$dst" 2>/dev/null || true
 }
 
