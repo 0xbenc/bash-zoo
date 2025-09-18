@@ -480,20 +480,14 @@ add_path_line() {
 }
 
 install_file() {
-    local src="$1" dst_dir="$2" name="$3" mode="$4" # mode: copy|symlink
+    local src="$1" dst_dir="$2" name="$3"
     local dst="$dst_dir/$name"
-    if [[ "$mode" == "symlink" ]]; then
-        ln -sf "$src" "$dst" 2>/dev/null || return 1
-    else
-        # copy
-        cp -f "$src" "$dst" 2>/dev/null || return 1
-    fi
+    cp -f "$src" "$dst" 2>/dev/null || return 1
     chmod +x "$dst" 2>/dev/null || true
 }
 
 install_astra_launcher() {
     local dst_dir="$1"
-    local mode="$2"
     local dst="$dst_dir/astra"
     local share_root repo_script runtime_root runtime_bin
     local preferred_bash=""
@@ -513,10 +507,6 @@ install_astra_launcher() {
     escaped_repo=$(printf '%q' "$repo_script")
     escaped_runtime=$(printf '%q' "$runtime_bin")
     escaped_preferred=$(printf '%q' "$preferred_bash")
-
-    if [[ "$mode" == "symlink" ]]; then
-        echo "Astra requires a launcher wrapper; creating script instead of symlink." >&2
-    fi
 
     cat > "$dst" <<EOF
 #!/bin/bash
@@ -616,9 +606,8 @@ if [[ ${#selected_scripts[@]} -gt 0 ]]; then
     esac
 
     target_dir=$(resolve_target_dir)
-    install_mode="copy"
-    if [[ "${BZ_SYMLINK:-}" == "1" || "${BZ_SYMLINK:-}" == "true" ]]; then
-        install_mode="symlink"
+    if [[ -n "${BZ_SYMLINK:-}" ]]; then
+        echo "BZ_SYMLINK is no longer supported; installing launchers as copies." >&2
     fi
 
     installed_to_bin=()
@@ -627,7 +616,7 @@ if [[ ${#selected_scripts[@]} -gt 0 ]]; then
     if ensure_dir "$target_dir" && is_writable_dir "$target_dir"; then
         for script in "${selected_scripts[@]}"; do
             if [[ "$script" == "astra" ]]; then
-                if install_astra_launcher "$target_dir" "$install_mode"; then
+                if install_astra_launcher "$target_dir"; then
                     installed_to_bin+=("$script")
                 else
                     src="$PWD/$SCRIPTS_DIR/$script.sh"
@@ -638,7 +627,7 @@ if [[ ${#selected_scripts[@]} -gt 0 ]]; then
             fi
 
             src="$PWD/$SCRIPTS_DIR/$script.sh"
-            if install_file "$src" "$target_dir" "$script" "$install_mode"; then
+            if install_file "$src" "$target_dir" "$script"; then
                 installed_to_bin+=("$script")
             else
                 add_or_update_alias "$script" "$src" "$RC_FILE"
