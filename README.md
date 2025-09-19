@@ -17,7 +17,7 @@
 ## TL;DR
 
 ```bash
-git clone https://github.com/xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
+git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 ```
 
 ## Table of Contents
