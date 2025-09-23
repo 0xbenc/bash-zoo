@@ -14,7 +14,8 @@ Usage:
 
 Checks PATH (default: current directory) recursively for Git repositories
 and reports any that have uncommitted changes or commits not pushed to
-their upstream. Exits with code 1 if any issues are found, else 0.
+their upstream. Shows the current branch for each flagged repository.
+Exits with code 1 if any issues are found, else 0.
 
 Environment:
   NO_COLOR=1    Disable colored output
@@ -70,6 +71,7 @@ echo "${DIM}Scanning ${#repos[@]} Git repos under: ${start_dir}${RESET}"
 out_repo=()
 out_has_changes=()
 out_ahead=() # values: number | no-upstream | 0
+out_branch=()
 
 changes_count=0
 ahead_count_total=0
@@ -98,9 +100,25 @@ for repo in "${repos[@]}"; do
     has_changes=1; changes_count=$((changes_count+1))
   fi
 
-  # Unpushed commits (ahead of upstream). If no upstream, consider as needing push
-  branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
-  if [[ "$branch" != "HEAD" ]]; then
+  # Determine current branch (robustly) and ahead state
+  # Prefer symbolic-ref (quiet) to avoid odd outputs and exit statuses
+  branch_name="$(git -C "$repo" symbolic-ref --short -q HEAD 2>/dev/null || true)"
+  if [[ -n "$branch_name" ]]; then
+    branch_disp="$branch_name"
+  else
+    # Detached HEAD; try to show short commit
+    shorthash="$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || true)"
+    if [[ -n "$shorthash" ]]; then
+      branch_disp="detached@$shorthash"
+    else
+      branch_disp="detached"
+    fi
+  fi
+  # Sanitize any stray newlines/carriage returns
+  branch_disp=${branch_disp//$'\r'/}
+  branch_disp=${branch_disp//$'\n'/ }
+
+  if [[ -n "$branch_name" ]]; then
     if git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
       ahead_n="$(git -C "$repo" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
       if [[ "${ahead_n:-0}" -gt 0 ]]; then
@@ -122,6 +140,7 @@ for repo in "${repos[@]}"; do
     out_repo+=("$disp")
     out_has_changes+=("$has_changes")
     out_ahead+=("$ahead_state")
+    out_branch+=("$branch_disp")
   fi
 done
 
@@ -144,6 +163,7 @@ for i in "${!out_repo[@]}"; do
   name="${out_repo[$i]}"
   chg="${out_has_changes[$i]}"
   ahead="${out_ahead[$i]}"
+  branch_disp="${out_branch[$i]}"
 
   parts=()
   if [[ "$chg" == "1" ]]; then
@@ -162,7 +182,12 @@ for i in "${!out_repo[@]}"; do
     status+="${parts[$j]}"
   done
 
-  printf "  • %-${pad}s   %s\n" "$name" "$status"
+  # Print repo name, branch, then status
+  if [[ -n "$status" ]]; then
+    printf "  • %-${pad}s   ${FG_CYAN}(%s)${RESET}   %s\n" "$name" "$branch_disp" "$status"
+  else
+    printf "  • %-${pad}s   ${FG_CYAN}(%s)${RESET}\n" "$name" "$branch_disp"
+  fi
 done
 
 # Summary line
