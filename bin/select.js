@@ -59,6 +59,12 @@ async function main() {
     hint: 'Use arrow keys to move, space to select, enter to confirm',
     // show at least 10 lines if possible for comfort
     limit: Math.max(10, Math.min(choices.length, 20)),
+    symbols: {
+      indicator: {
+        on: '■',
+        off: '□',
+      },
+    },
     // Route UI rendering to stderr so stdout stays clean for results
     stdin: process.stdin,
     stdout: process.stderr,
