@@ -27,6 +27,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 - [Tool Details](#tool-details)
   - [astra](#astra)
   - [forgit](#forgit)
+  - [airplane](#airplane)
   - [share](#share)
   - [uuid](#uuid)
   - [zapp](#zapp)
@@ -53,6 +54,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 | --- | --- | --- | --- |
 | `astra` | Terminal file manager with fuzzy search and previews | macOS, Debian/Ubuntu | `bash`, `fzf`, `jq`, `fd`/`fd-find`, `ripgrep`, `bat`, `chafa`, `poppler-utils`, `atool` |
 | `mfa` | Generate TOTP codes from `pass` and copy them to your clipboard | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
+| `airplane` | Per-terminal offline mode: LAN allowed, WAN blocked | Debian/Ubuntu | installer applies firewall rules (root) |
 | `share` | Secure one-time file, folder, or clipboard transfer through a relay | Debian/Ubuntu | `curl`, `openssl`, `socat` |
 | `uuid` | Create and copy a fresh UUID without leaving the terminal | Debian/Ubuntu | `xclip` |
 | `zapp` | Launch an AppImage or unpacked app stored under `~/zapps` | Debian/Ubuntu | none |
@@ -68,6 +70,27 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 ### forgit
 
 `forgit` sweeps the directories beneath your current working tree and flags every Git repository with uncommitted changes or pending pushes. It also shows the current branch for each flagged repository so you can jump directly to the right place. Use it as a morning ritual to catch forgotten work: run `forgit` from `~/code` (or similar) and drill into repositories that show up with red or yellow markers. The script respects Git status output, so clean repos never clutter the list.
+
+### airplane
+
+`airplane` flips a single terminal into “offline mode” so tools you start there can serve the LAN but cannot reach the wider internet. Think: run `npm run dev` and your dev server is reachable from your phone/laptop on Wi‑Fi, but any outbound fetches to CDNs/APIs time out. Other terminals stay online. Linux only.
+
+- Per‑terminal: `airplane` spawns a child shell. Leave with `exit`.
+- LAN allowed: loopback and RFC1918 ranges (10/8, 172.16/12, 192.168/16, 169.254/16).
+- WAN blocked: all other outbound traffic from that shell’s processes.
+- Two modes:
+  - strict (recommended, Linux): installer creates an `airplane` group plus iptables/ip6tables rules. `airplane` runs a subshell under that group so only those processes are restricted.
+  - soft (fallback): if not installed system‑wide, `airplane` sets proxy env vars to a local blackhole with `NO_PROXY` for LAN/loopback. Covers most HTTP(S) tools, but not raw sockets.
+
+Common flows
+- `airplane` or `airplane on` — enter an offline subshell. Prompt shows `[airplane]` when possible.
+- `airplane run <cmd>` — run a single command inside the offline environment.
+- `airplane status` — print ON/OFF and mode.
+- `airplane exit` (alias: `airplane land`, `airplane off`) — leave the airplane subshell; `exit` also works.
+
+Notes
+- Linux (Debian/Ubuntu): uses `iptables`/`ip6tables` to filter egress in the OUTPUT chain for group `airplane`. Requires sudo during install.
+- IPv6: LAN link‑local (`fe80::/10`) and ULA (`fc00::/7`) are allowed in strict mode; everything else is blocked.
 
 ### share
 
@@ -141,6 +164,7 @@ cd bash-zoo
 | `uuid` | ⛔️ | ✅ |
 | `zapp` + `zapper` | ⛔️ | ✅ |
 | `forgit` | ✅ | ✅ |
+| `airplane` | ⛔️ | ✅ |
 | `install.sh` | ✅ *(Homebrew required for dependencies)* | ✅ *(APT and friends)* |
 
 > The installer gracefully exits on unsupported platforms without touching your system.
