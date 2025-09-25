@@ -19,6 +19,35 @@ sudo_prep() {
   fi
 }
 
+ensure_firewall_tooling() {
+  local needs_install=0
+  if ! command -v iptables >/dev/null 2>&1; then
+    needs_install=1
+  fi
+  if ! command -v ip6tables >/dev/null 2>&1; then
+    needs_install=1
+  fi
+
+  if [[ $needs_install -eq 1 ]]; then
+    if ! command -v apt >/dev/null 2>&1; then
+      echo "Error: iptables tooling missing and 'apt' is unavailable. Install iptables manually." >&2
+      exit 1
+    fi
+    echo "Installing iptables tooling (Debian/Ubuntu)..."
+    sudo apt update -y
+    sudo apt install -y iptables iptables-persistent
+  fi
+
+  if ! command -v iptables >/dev/null 2>&1; then
+    echo "Error: iptables not found after installation attempt." >&2
+    exit 1
+  fi
+
+  if ! command -v ip6tables >/dev/null 2>&1; then
+    echo "Warning: ip6tables not found; IPv6 egress will not be filtered." >&2
+  fi
+}
+
 ensure_group() {
   if getent group airplane >/dev/null 2>&1; then
     :
@@ -113,6 +142,7 @@ setup_iptables_v6() {
 
 main() {
   sudo_prep || true
+  ensure_firewall_tooling
   require_cmd id
   ensure_group
   setup_iptables_v4
