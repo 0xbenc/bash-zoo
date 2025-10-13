@@ -42,6 +42,183 @@ if [[ ! -f "$REGISTRY_FILE" ]]; then
     exit 1
 fi
 
+# One-time ASCII animation ("0xbenc") before interactive selection
+# - Skips if not a TTY or disabled via BZ_NO_ASCII=1
+# - Uses text frame files under ascii/0xbenc if present
+play_ascii_once() {
+  if [[ -n "${BZ_NO_ASCII:-}" ]]; then
+    return 0
+  fi
+  if [[ ! -t 1 ]]; then
+    return 0
+  fi
+  # Some CI terms are "dumb" and don't render control sequences well
+  if [[ "${TERM:-}" == "dumb" ]]; then
+    return 0
+  fi
+
+  local restore_cursor=0
+  if command -v tput >/dev/null 2>&1; then
+    if tput civis >/dev/null 2>&1; then
+      restore_cursor=1
+    fi
+  fi
+
+  # Clear + home. Use ANSI CSI as a portable fallback if tput is unavailable
+  local clear_cmd="printf '\033[2J\033[H'"
+  if command -v tput >/dev/null 2>&1; then
+    clear_cmd="tput clear"
+  fi
+
+  local frames_dir="${BZ_ASCII_DIR:-$PWD/ascii/0xbenc}"
+  local use_files=0
+  if compgen -G "$frames_dir/frame_*.txt" >/dev/null 2>&1; then
+    use_files=1
+  fi
+
+  if [[ $use_files -eq 1 ]]; then
+    # Discover highest frame index, assuming names frame_1.txt..frame_N.txt
+    local max_frames=0 f base n
+    for f in "$frames_dir"/frame_*.txt; do
+      base=${f##*/}
+      n=${base#frame_}
+      n=${n%.txt}
+      case "$n" in
+        (*[!0-9]*) continue ;;
+      esac
+      if (( n > max_frames )); then max_frames=$n; fi
+    done
+    # Guard if somehow none parsed
+    if (( max_frames <= 0 )); then
+      use_files=0
+    else
+      local cycles=${BZ_ASCII_CYCLES:-1}
+      local i r
+      for (( r=1; r<=cycles; r++ )); do
+        for (( i=1; i<=max_frames; i++ )); do
+          eval "$clear_cmd" || true
+          if [[ -f "$frames_dir/frame_${i}.txt" ]]; then
+            cat "$frames_dir/frame_${i}.txt"
+          fi
+          sleep 0.08
+        done
+      done
+      eval "$clear_cmd" || true
+      if [[ $restore_cursor -eq 1 ]]; then
+        tput cnorm >/dev/null 2>&1 || true
+      fi
+      return 0
+    fi
+  fi
+
+  # Fallback: simple orbit if no frame files present
+  ascii_frame() {
+    case "$1" in
+      0)
+cat <<'EOF'
+                               
+               o               
+                               
+            0xbenc             
+                               
+                               
+                               
+EOF
+        ;;
+      1)
+cat <<'EOF'
+                               
+                        o      
+                               
+            0xbenc             
+                               
+                               
+                               
+EOF
+        ;;
+      2)
+cat <<'EOF'
+                               
+                               
+                               
+            0xbenc        o    
+                               
+                               
+                               
+EOF
+        ;;
+      3)
+cat <<'EOF'
+                               
+                               
+                               
+            0xbenc             
+                        o      
+                               
+                               
+EOF
+        ;;
+      4)
+cat <<'EOF'
+                               
+                               
+                               
+            0xbenc             
+                               
+               o               
+                               
+EOF
+        ;;
+      5)
+cat <<'EOF'
+                               
+                               
+                               
+            0xbenc             
+                               
+        o                      
+                               
+EOF
+        ;;
+      6)
+cat <<'EOF'
+                               
+                               
+                               
+        o   0xbenc             
+                               
+                               
+                               
+EOF
+        ;;
+      7)
+cat <<'EOF'
+                               
+      o                        
+                               
+            0xbenc             
+                               
+                               
+                               
+EOF
+        ;;
+    esac
+  }
+
+  local i r
+  for r in 1 2; do
+    for i in 0 1 2 3 4 5 6 7; do
+      eval "$clear_cmd" || true
+      ascii_frame "$i"
+      sleep 0.08
+    done
+  done
+  eval "$clear_cmd" || true
+  if [[ $restore_cursor -eq 1 ]]; then
+    tput cnorm >/dev/null 2>&1 || true
+  fi
+}
+
 # Detect OS: debian-like linux, macOS, or other
 OS_TYPE="other"
 UNAME_S=$(uname -s)
@@ -57,6 +234,9 @@ if [[ "$OS_TYPE" == "other" ]]; then
     echo "Unsupported platform (not Debian-like Linux or macOS). No setup helpers available."
     exit 0
 fi
+
+# Play rotating ASCII animation once before showing selector
+play_ascii_once
 
 # Read registry and build candidate list for this OS
 scripts=()
