@@ -134,7 +134,7 @@ Security note: `mfa` never passes your secret as a command argument. It reads th
 
 ### passage
 
-`passage` is an interactive browser for your GNU Pass store. It lists entries with fuzzy search, supports favorites (pins) and MRU ordering, and lets you:
+`passage` is an interactive browser for your GNU Pass store. It lists entries with fuzzy search, supports favorites (pins) and MRU ordering, and uses a persistent right-side preview to show instructions and results without leaving the main list. You can:
 
 - Copy the password (first line) directly.
 - Reveal the password on screen until you clear it (also copies to clipboard).
@@ -142,20 +142,18 @@ Security note: `mfa` never passes your secret as a command argument. It reads th
 
 Notes
 - Requires `pass` and `fzf` and a clipboard adapter (`pbcopy`, `wl-copy`, `xclip`, or `xsel`).
-- No TOTP or preview panes — use `mfa` for TOTP codes.
-- Safe defaults: no secrets printed unless you choose a Reveal action.
-- Quick-select keys (mfa-style slots):
-  - Ctrl+Letter: open Actions for that entry
-  - Alt+Letter: copy password for that entry
-  - Alt+Shift+Letter: reveal password for that entry
-  - Alt-p: toggle pin on selected row; Alt-o: options
- - Actions menu mnemonics:
-   - Alt/Ctrl-c: Copy password
-   - Alt/Ctrl-r: Reveal password
-   - Alt/Ctrl-p: Pin/Unpin
-   - Alt/Ctrl-x: Clear clipboard
-   - Alt/Ctrl-b: Back
-   - Alt/Ctrl-q: Quit
+- No TOTP (use `mfa` for TOTP codes).
+- Safe defaults: no secrets printed unless you choose Reveal.
+- Keys (act on current selection; preview shows results):
+  - `c`: Copy password (stays in fzf, preview shows “Copied”).
+  - `r`: Reveal password in preview (also copies). `h` or `b` hides.
+  - `p`: Pin/Unpin current entry (list reloads to reflect order).
+  - `O`: Unpin all; `R`: Clear recents.
+  - `x`: Clear clipboard.
+  - `Esc`: Quit.
+- Slot hotkeys (fast index jump like `mfa`):
+  - `Ctrl+Letter` or `Alt+Letter`: copy that slot; `Alt+Shift+Letter`: reveal that slot.
+  - These operate in-place and update the side preview.
 
 ## Installation
 
