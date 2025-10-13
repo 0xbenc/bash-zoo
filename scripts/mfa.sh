@@ -196,7 +196,7 @@ SCRIPT
   printf -v prompt '%s:: Search >%s ' "$BOLD$FG_MAGENTA" "$RESET"
   pointer='>>'
   marker='>>'
-  printf -v header '%sList of TOTPs%s\n%sType to filter | Enter to select | Ctrl+letter to select | Arrows to nav%s' \
+  printf -v header '%sList of TOTPs%s\n%sType to filter | Enter to select | Ctrl+letter to select | Arrows to nav | Esc to exit%s' \
     "$BOLD$FG_CYAN" "$RESET" "$DIM" "$RESET"
 
   local -a bind_options=()

@@ -1,12 +1,12 @@
-# script	oses	has_deps
+# script	oses	has_deps	desc
 # oses: comma-separated from {debian,macos}
 # has_deps: yes => run setup/$os/$script.sh, no => chmod + alias only
-mfa	debian,macos	yes
-share	debian	yes
-uuid	debian	yes
-zapp	debian	no
-zapper	debian	no
-forgit	debian,macos	yes
-astra	debian,macos	yes
-airplane	debian	yes
-passage	debian,macos	yes
+mfa	debian,macos	yes	Terminal MFA (TOTP) helper for GNU Pass
+share	debian	yes	Secure share via magic-wormhole with AES-256 and 4-digit PIN.
+uuid	debian	yes	Generate a UUID and copy it to the clipboard.
+zapp	debian	no	Launch apps easily.
+zapper	debian	no	Install apps easily.
+forgit	debian,macos	yes	Find git repos with uncommitted or unpushed work under a path.
+astra	debian,macos	yes	File browser.
+airplane	debian	yes	Virtaul "Airplane Mode" disables WWW but not WLAN.
+passage	debian,macos	yes	Interactive pass browser with pins + MRU and clipboard helpers.

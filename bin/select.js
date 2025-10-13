@@ -69,6 +69,18 @@ async function main() {
     // Route UI rendering to stderr so stdout stays clean for results
     stdin: process.stdin,
     stdout: process.stderr,
+    // Dynamic footer shows hovered item's summary/description
+    footer() {
+      try {
+        const c = this.focused || (this.choices ? this.choices[this.index || 0] : null);
+        const text = c && (c.summary || c.message || c.name) || '';
+        if (!text) return '';
+        const style = (this.styles && this.styles.muted) ? this.styles.muted : (s) => s;
+        return '\n' + style(String(text));
+      } catch {
+        return '';
+      }
+    },
     // Show a clean summary with only actual names when submitted
     format() {
       try {

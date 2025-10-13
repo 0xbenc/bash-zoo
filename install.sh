@@ -268,7 +268,8 @@ scripts=()
 scripts_has_deps=()
 install_astra_assets=0
 
-while IFS=$'\t' read -r name oses has_deps _rest; do
+scripts_desc=()
+while IFS=$'\t' read -r name oses has_deps desc; do
     # skip comments and empty lines
     [[ -z "${name:-}" ]] && continue
     [[ "$name" =~ ^# ]] && continue
@@ -300,6 +301,8 @@ while IFS=$'\t' read -r name oses has_deps _rest; do
             yes|true|1) scripts_has_deps+=("yes") ;;
             *)          scripts_has_deps+=("no")  ;;
         esac
+        # store description (optional 4th column)
+        scripts_desc+=("${desc:-}")
     fi
 done < "$REGISTRY_FILE"
 
@@ -315,6 +318,7 @@ done
 if [[ $zapp_idx -ge 0 || $zapper_idx -ge 0 ]]; then
     new_scripts=()
     new_has_deps=()
+    new_desc=()
     for i in "${!scripts[@]}"; do
         name="${scripts[i]}"
         # Skip individual entries; we will add the grouped one below
@@ -323,6 +327,7 @@ if [[ $zapp_idx -ge 0 || $zapper_idx -ge 0 ]]; then
         fi
         new_scripts+=("$name")
         new_has_deps+=("${scripts_has_deps[i]}")
+        new_desc+=("${scripts_desc[i]}")
     done
     # Insert grouped entry once if either exists for this OS
     new_scripts+=("zapps")
@@ -331,8 +336,22 @@ if [[ $zapp_idx -ge 0 || $zapper_idx -ge 0 ]]; then
     if [[ $zapp_idx -ge 0 && "${scripts_has_deps[$zapp_idx]}" == "yes" ]]; then dep_flag="yes"; fi
     if [[ $zapper_idx -ge 0 && "${scripts_has_deps[$zapper_idx]}" == "yes" ]]; then dep_flag="yes"; fi
     new_has_deps+=("$dep_flag")
+    # Build a concise description for the grouped entry
+    z_desc=""
+    if [[ $zapp_idx -ge 0 && -n "${scripts_desc[$zapp_idx]}" ]]; then
+      z_desc+="zapp — ${scripts_desc[$zapp_idx]}"
+    fi
+    if [[ $zapper_idx -ge 0 && -n "${scripts_desc[$zapper_idx]}" ]]; then
+      [[ -n "$z_desc" ]] && z_desc+=$'\n'
+      z_desc+="zapper — ${scripts_desc[$zapper_idx]}"
+    fi
+    if [[ -z "$z_desc" ]]; then
+      z_desc="zapp + zapper helpers for managing apps in ~/zapps"
+    fi
+    new_desc+=("$z_desc")
     scripts=("${new_scripts[@]}")
     scripts_has_deps=("${new_has_deps[@]}")
+    scripts_desc=("${new_desc[@]}")
 fi
 
 if [[ ${#scripts[@]} -eq 0 ]]; then
@@ -405,7 +424,7 @@ if [[ $select_all -eq 1 ]]; then
     echo "Selecting all available scripts for $OS_TYPE."
     selected_names=("${scripts[@]}")
 else
-    payload='{ "title": "Select items to install", "choices": ['
+    payload='{ "title": "Select tools to install", "choices": ['
     for i in "${!scripts[@]}"; do
         label="${scripts[i]}"
         if [[ "${scripts[i]}" == "zapps" ]]; then
@@ -414,7 +433,12 @@ else
         # escape quotes in label just in case
         esc_label=$(printf '%s' "$label" | sed 's/"/\\"/g')
         esc_name=$(printf '%s' "${scripts[i]}" | sed 's/"/\\"/g')
-        payload+="{\"name\":\"$esc_name\",\"message\":\"$esc_label\"},"
+        # escape description/summary safely; also collapse CR/LF to spaces
+        summary="${scripts_desc[i]:-}"
+        summary=${summary//$'\r'/ }
+        summary=${summary//$'\n'/ }
+        esc_summary=$(printf '%s' "$summary" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        payload+="{\"name\":\"$esc_name\",\"message\":\"$esc_label\",\"summary\":\"$esc_summary\"},"
     done
     # Trim trailing comma and close array
     payload=${payload%,}
@@ -455,6 +479,12 @@ else
                 fi
                 echo -e "$label\e[0m"
             done
+            echo
+            # Show contextual description for the currently focused item
+            cur_desc="${scripts_desc[current]:-}"
+            if [[ -n "$cur_desc" ]]; then
+              echo -e "\e[2m$cur_desc\e[0m"
+            fi
         }
         while true; do
             draw_menu
