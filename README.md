@@ -114,17 +114,19 @@ Notes
 
 1. **Dependencies** — Install `pass`, `oathtool`, and your platform clipboard helper (`pbcopy` on macOS, `xclip`/`xsel` on Debian).
 2. **Initialize pass** — Generate (or reuse) a GPG key, then run `pass init <gpg-id>`. This creates `~/.password-store` as your encrypted vault.
-3. **Store MFA secrets** — Create an entry for each service that ends in `/mfa`, because the script searches for files named `mfa.gpg`. For example:
+3. **Store MFA secrets** — Create an entry for each service that ends in `/mfa`, because the script searches for files named `mfa.gpg`. The entry must contain a single-line base32 secret (no URIs, no extra lines). For example:
 
    ```bash
    export PASSWORD_STORE_DIR=~/.password-store  # optional if using the default
-   pass insert --multiline work/github/mfa
+   pass insert work/github/mfa                  # paste base32 secret on one line
    ```
 
-   Paste the raw TOTP secret (or URI) when prompted. The file lands at `~/.password-store/work/github/mfa.gpg`.
+   Paste the raw base32 TOTP secret when prompted (single line). The file lands at `~/.password-store/work/github/mfa.gpg`.
 4. **Sync across devices (optional)** — If you use git to sync your password store, commit the new entry so other machines running `mfa` can see it. The script respects `PASSWORD_STORE_DIR` if you keep the store somewhere else.
 
 Once the store contains at least one `*/mfa` entry, run `mfa`, fuzzy-search the account, and the current 6-digit code lands in your clipboard. The countdown banner helps you see how long the code remains valid.
+
+Security note: `mfa` never passes your secret as a command argument. It reads the single-line secret from `pass` and feeds it to `oathtool` via stdin to avoid exposure in process listings.
 
 > All installers live in `installers/<os>/<script>.sh` and match the script names one-to-one.
 

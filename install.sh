@@ -174,7 +174,7 @@ ensure_enquirer() {
         return 1
     fi
 
-    echo "Preparing modern selector (installing enquirer)..."
+    echo "Preparing selector (installing enquirer)..."
     case "$PM" in
         npm)
             ( cd "$PWD/.interactive" && npm install --silent enquirer@^2 ) || return 1 ;;
@@ -200,11 +200,11 @@ if [[ $select_all -eq 1 ]]; then
     echo "Selecting all available scripts for $OS_TYPE."
     selected_names=("${scripts[@]}")
 else
-    payload='{ "title": "Select scripts to install", "choices": ['
+    payload='{ "title": "Select items to install", "choices": ['
     for i in "${!scripts[@]}"; do
         label="${scripts[i]}"
         if [[ "${scripts[i]}" == "zapps" ]]; then
-            label="zapps (zapp+zapper)"
+            label="zapps (zapp + zapper)"
         fi
         # escape quotes in label just in case
         esc_label=$(printf '%s' "$label" | sed 's/"/\\"/g')
@@ -231,7 +231,6 @@ else
         draw_menu() {
             clear
             echo "Use 'J' and 'K' to move, 'H' to toggle, 'L' to confirm."
-            echo "Detected platform: $OS_TYPE"
             for i in "${!scripts[@]}"; do
                 if [[ $i -eq $current ]]; then
                     echo -ne "\e[1;32m> "
@@ -247,7 +246,7 @@ else
 
                 label="${scripts[i]}"
                 if [[ "${scripts[i]}" == "zapps" ]]; then
-                    label="zapps (zapp+zapper)"
+                    label="zapps (zapp + zapper)"
                 fi
                 echo -e "$label\e[0m"
             done
@@ -274,7 +273,7 @@ else
     clear
 fi
 
-echo "Installing selected scripts..."
+echo "Installing selected items..."
 selected_scripts=()
 
 # Idempotent alias add/update
@@ -649,8 +648,7 @@ if [[ ${#selected_scripts[@]} -gt 0 ]]; then
         else
             echo "Adding $target_dir to PATH in $RC_FILE ..."
             add_path_line "$RC_FILE" "$target_dir"
-            echo "Added. Reload your shell to apply:"
-            echo "  exec $USER_SHELL -l"
+            echo "Added."
         fi
     fi
 
@@ -660,12 +658,13 @@ if [[ ${#selected_scripts[@]} -gt 0 ]]; then
     fi
     if [[ ${#installed_as_alias[@]} -gt 0 ]]; then
         echo "Configured aliases in $RC_FILE: ${installed_as_alias[*]}"
-        echo "Reload your shell to use aliases:"
-        echo "  exec $USER_SHELL -l"
     fi
 else
-    echo "No scripts selected. Exiting."
+    echo "No items selected. Exiting."
     exit 0
 fi
 
 echo "Installation complete!"
+echo "Open a new terminal or run:"
+echo "  exec \"$SHELL\" -l"
+echo "to reload your shell configuration."

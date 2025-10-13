@@ -112,6 +112,7 @@ choose_entry() {
   local tmp_input tmp_script
   tmp_input=$(mktemp "${TMPDIR:-/tmp}/mfa_fzf_input.XXXXXX")
   tmp_script=$(mktemp "${TMPDIR:-/tmp}/mfa_fzf_order.XXXXXX")
+  trap 'rm -f "$tmp_input" "$tmp_script"' INT TERM EXIT
 
   # Pre-render the list once so we can reuse it for fuzzy and exact passes.
   {
@@ -213,10 +214,12 @@ SCRIPT
       "${bind_options[@]}" < "$tmp_input"
   ); then
     rm -f "$tmp_input" "$tmp_script"
+    trap - INT TERM EXIT
     return 1
   fi
 
   rm -f "$tmp_input" "$tmp_script"
+  trap - INT TERM EXIT
   printf '%s' "${selected_line%%$'\t'*}"
   return 0
 }
@@ -339,6 +342,54 @@ show_result() {
   printf '\n'
 }
 
+# Generate an OTP from a pass entry while avoiding secret exposure in argv.
+# Rules:
+# - Exactly one line (ignoring trailing newlines); multi-line content is rejected.
+# - No URI support; entry must be a single-line base32 secret.
+# - Whitespace in the single line is stripped.
+mfa_generate_otp_from_pass() {
+  local entry="$1"
+  local content first rest secret code
+
+  # Read decrypted content into memory once; not exposed via ps/argv.
+  if ! content="$(pass show -- "$entry")"; then
+    return 1
+  fi
+
+  # Split first line and the remainder (if any)
+  first="${content%%$'\n'*}"
+  if [[ "$content" == *$'\n'* ]]; then
+    rest="${content#*$'\n'}"
+  else
+    rest=""
+  fi
+
+  # Reject additional non-whitespace content beyond the first line
+  if [[ -n "${rest//[[:space:]]/}" ]]; then
+    die "MFA entry must contain exactly one line (base32 secret)."
+  fi
+
+  # Trim whitespace within the first line
+  secret="${first//[[:space:]]/}"
+
+  if [[ -z "$secret" ]]; then
+    die "MFA secret is empty. Ensure one non-empty line."
+  fi
+  if [[ "$secret" == otpauth://* ]]; then
+    die "otpauth URIs are not supported. Store the base32 secret only (one line)."
+  fi
+
+  # Feed the secret via stdin so it never appears in argv.
+  if ! code="$(printf '%s' "$secret" | oathtool --totp -b - 2>/dev/null)"; then
+    die "oathtool failed to generate a code."
+  fi
+
+  # Minimize lifetime of sensitive variables
+  unset -v content first rest secret || true
+
+  printf '%s' "$code"
+}
+
 main() {
   pass_entries=()
   display_labels=()
@@ -383,12 +434,12 @@ main() {
     die "Missing dependencies: require 'pass' and 'oathtool'."
   fi
 
+  # Generate OTP without exposing the secret via argv/ps.
+  # Enforce: exactly one non-empty line; no URI support; spaces trimmed.
   local otp
-  if ! otp="$(oathtool --totp -b "$(pass show "$selected_entry")")"; then
-    die "Failed to generate OTP for '$selected_entry'."
-  fi
-
-  if [[ -z "$otp" ]]; then
+  if ! otp="$(
+    mfa_generate_otp_from_pass "$selected_entry"
+  )"; then
     die "Failed to generate OTP for '$selected_entry'."
   fi
 
