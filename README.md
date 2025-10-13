@@ -25,15 +25,15 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 - [Why Bash Zoo](#why-bash-zoo)
 - [Tools at a Glance](#tools-at-a-glance)
 - [Tool Details](#tool-details)
+  - [airplane](#airplane)
   - [astra](#astra)
   - [forgit](#forgit)
-  - [airplane](#airplane)
+  - [mfa](#mfa)
+  - [passage](#passage)
   - [share](#share)
   - [uuid](#uuid)
   - [zapp](#zapp)
   - [zapper](#zapper)
-  - [mfa](#mfa)
-  - [passage](#passage)
 - [Installation](#installation)
 - [Platform Support](#platform-support)
 - [Daily Use](#daily-use)
@@ -53,25 +53,17 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 
 | Script | Superpower | Platforms | Extra Packages |
 | --- | --- | --- | --- |
-| `astra` | Terminal file manager with fuzzy search and previews | macOS, Debian/Ubuntu | `bash`, `fzf`, `jq`, `fd`/`fd-find`, `ripgrep`, `bat`, `chafa`, `poppler-utils`, `atool` |
-| `mfa` | Generate TOTP codes from `pass` and copy them to your clipboard | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
 | `airplane` | Per-terminal offline mode: LAN allowed, WAN blocked | Debian/Ubuntu | installer applies firewall rules (root) |
+| `astra` | Terminal file manager with fuzzy search and previews | macOS, Debian/Ubuntu | `bash`, `fzf`, `jq`, `fd`/`fd-find`, `ripgrep`, `bat`, `chafa`, `poppler-utils`, `atool` |
+| `forgit` | Scan directories for Git repos needing commits or pushes | macOS, Debian/Ubuntu | `git` |
+| `mfa` | Generate TOTP codes from `pass` and copy them to your clipboard | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
+| `passage` | Interactive GNU Pass browser with pins and MRU; copy or reveal password | macOS, Debian/Ubuntu | `pass`, `fzf`, platform clipboard utility |
 | `share` | Secure one-time file, folder, or clipboard transfer through a relay | Debian/Ubuntu | `curl`, `openssl`, `socat` |
 | `uuid` | Create and copy a fresh UUID without leaving the terminal | Debian/Ubuntu | `xclip` |
 | `zapp` | Launch an AppImage or unpacked app stored under `~/zapps` | Debian/Ubuntu | none |
 | `zapper` | Prepare, validate, and register new apps for `zapp` with desktop entries | Debian/Ubuntu | `desktop-file-utils` |
-| `forgit` | Scan directories for Git repos needing commits or pushes | macOS, Debian/Ubuntu | `git` |
-| `passage` | Interactive GNU Pass browser with pins and MRU; copy or reveal password | macOS, Debian/Ubuntu | `pass`, `fzf`, platform clipboard utility |
 
 ## Tool Details
-
-### astra
-
-`astra` is a Bash-first terminal file manager that wraps `fzf`, `fd`, and `ripgrep` to stay fast while remaining approachable. The standalone UI streams directory listings through `fzf` with a live preview pane powered by `bat`, `chafa`, `pdftotext`, and friends. A static control panel now anchors to the bottom-right beneath the preview so shortcuts stay visible without crowding results. Core features include one-keystroke navigation, batch file operations, and JSON-based configuration. Headline keys: `Enter`/`→` to descend, `←`/`h` or the `[↑] ..` row to walk up, `.` to toggle hidden files, `Ctrl-G` for fuzzy name search, `Ctrl-Y` copy, `Alt-M` move, `Ctrl-D` delete, `Space` to tag multiple rows. See `astra/USAGE.md` for the full walkthrough. macOS and Debian users get the same code path; the installers pull in Homebrew or APT dependencies so previews “just work.”
-
-### forgit
-
-`forgit` sweeps the directories beneath your current working tree and flags every Git repository with uncommitted changes or pending pushes. It also shows the current branch for each flagged repository so you can jump directly to the right place. Use it as a morning ritual to catch forgotten work: run `forgit` from `~/code` (or similar) and drill into repositories that show up with red or yellow markers. The script respects Git status output, so clean repos never clutter the list.
 
 ### airplane
 
@@ -94,21 +86,13 @@ Notes
 - Linux (Debian/Ubuntu): uses `iptables`/`ip6tables` to filter egress in the OUTPUT chain for group `airplane`. Requires sudo during install.
 - IPv6: LAN link‑local (`fe80::/10`) and ULA (`fc00::/7`) are allowed in strict mode; everything else is blocked.
 
-### share
+### astra
 
-`share` turns a local file, directory, or even clipboard contents into a one-time payload that can be pulled down with a shell command on another machine. It wraps `curl`, `openssl`, and `socat` to encrypt the payload, create a temporary relay, and print the matching `share receive` command for your recipient. When the download completes, the relay tears itself down so nothing lingers on disk or over the wire.
+`astra` is a Bash-first terminal file manager that wraps `fzf`, `fd`, and `ripgrep` to stay fast while remaining approachable. The standalone UI streams directory listings through `fzf` with a live preview pane powered by `bat`, `chafa`, `pdftotext`, and friends. A static control panel now anchors to the bottom-right beneath the preview so shortcuts stay visible without crowding results. Core features include one-keystroke navigation, batch file operations, and JSON-based configuration. Headline keys: `Enter`/`→` to descend, `←`/`h` or the `[↑] ..` row to walk up, `.` to toggle hidden files, `Ctrl-G` for fuzzy name search, `Ctrl-Y` copy, `Alt-M` move, `Ctrl-D` delete, `Space` to tag multiple rows. See `astra/USAGE.md` for the full walkthrough. macOS and Debian users get the same code path; the installers pull in Homebrew or APT dependencies so previews “just work.”
 
-### uuid
+### forgit
 
-`uuid` gives you a fresh RFC 4122 identifier and handles clipboard copy so you can paste immediately into logs or dashboards. It ships with a subcommand layout (`uuid print`, `uuid copy`, etc.) but the bare command defaults to copying, which keeps your keystrokes minimal when filling out forms or provisioning new infra.
-
-### zapp
-
-`zapp` launches AppImages or unpacked Linux apps you have staged under `~/zapps`. It normalizes the environment so you do not need to remember `chmod +x` or where a particular binary lives. Drop an AppImage or directory into `~/zapps/<name>` and run `zapp <name>` to execute it with sensible defaults.
-
-### zapper
-
-`zapper` prepares new entries for `zapp` by validating the payload, creating desktop files, and wiring up icons so the app shows up in launchers. It is the on-ramp for new AppImages: point it at a download, answer the prompts, then use `zapp` for day-to-day launching. Re-running `zapper` lets you update icons or fix metadata without touching the existing installation.
+`forgit` sweeps the directories beneath your current working tree and flags every Git repository with uncommitted changes or pending pushes. It also shows the current branch for each flagged repository so you can jump directly to the right place. Use it as a morning ritual to catch forgotten work: run `forgit` from `~/code` (or similar) and drill into repositories that show up with red or yellow markers. The script respects Git status output, so clean repos never clutter the list.
 
 ### mfa
 
@@ -155,6 +139,22 @@ Notes
   - `Ctrl+Letter` or `Alt+Letter`: copy that slot; `Alt+Shift+Letter`: reveal that slot.
   - These operate in-place and update the side preview.
 
+### share
+
+`share` turns a local file, directory, or even clipboard contents into a one-time payload that can be pulled down with a shell command on another machine. It wraps `curl`, `openssl`, and `socat` to encrypt the payload, create a temporary relay, and print the matching `share receive` command for your recipient. When the download completes, the relay tears itself down so nothing lingers on disk or over the wire.
+
+### uuid
+
+`uuid` gives you a fresh RFC 4122 identifier and handles clipboard copy so you can paste immediately into logs or dashboards. It ships with a subcommand layout (`uuid print`, `uuid copy`, etc.) but the bare command defaults to copying, which keeps your keystrokes minimal when filling out forms or provisioning new infra.
+
+### zapp
+
+`zapp` launches AppImages or unpacked Linux apps you have staged under `~/zapps`. It normalizes the environment so you do not need to remember `chmod +x` or where a particular binary lives. Drop an AppImage or directory into `~/zapps/<name>` and run `zapp <name>` to execute it with sensible defaults.
+
+### zapper
+
+`zapper` prepares new entries for `zapp` by validating the payload, creating desktop files, and wiring up icons so the app shows up in launchers. It is the on-ramp for new AppImages: point it at a download, answer the prompts, then use `zapp` for day-to-day launching. Re-running `zapper` lets you update icons or fix metadata without touching the existing installation.
+
 ## Installation
 
 ### Option A — Guided installer (recommended)
@@ -185,14 +185,14 @@ cd bash-zoo
 
 | Feature | macOS | Debian / Ubuntu |
 | --- | --- | --- |
+| `airplane` | ⛔️ | ✅ |
 | `astra` | ✅ *(Homebrew bash + deps required)* | ✅ |
+| `forgit` | ✅ | ✅ |
 | `mfa` | ✅ | ✅ |
+| `passage` | ✅ | ✅ |
 | `share` | ⛔️ | ✅ |
 | `uuid` | ⛔️ | ✅ |
 | `zapp` + `zapper` | ⛔️ | ✅ |
-| `forgit` | ✅ | ✅ |
-| `passage` | ✅ | ✅ |
-| `airplane` | ⛔️ | ✅ |
 | `install.sh` | ✅ *(Homebrew required for dependencies)* | ✅ *(APT and friends)* |
 
 > The installer gracefully exits on unsupported platforms without touching your system.
