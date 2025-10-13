@@ -27,13 +27,13 @@ if [[ $# -gt 0 ]]; then
 fi
 
 # Directories
-INSTALLERS_DIR="installers"
+SETUP_DIR="setup"
 SCRIPTS_DIR="scripts"
-REGISTRY_FILE="$INSTALLERS_DIR/registry.tsv"
+REGISTRY_FILE="$SETUP_DIR/registry.tsv"
 
 # Ensure directories exist
-if [[ ! -d "$INSTALLERS_DIR" || ! -d "$SCRIPTS_DIR" ]]; then
-    echo "Error: Both '$INSTALLERS_DIR' and '$SCRIPTS_DIR' directories must exist."
+if [[ ! -d "$SETUP_DIR" || ! -d "$SCRIPTS_DIR" ]]; then
+    echo "Error: Both '$SETUP_DIR' and '$SCRIPTS_DIR' directories must exist."
     exit 1
 fi
 
@@ -54,7 +54,7 @@ elif [[ "$UNAME_S" == "Linux" ]]; then
 fi
 
 if [[ "$OS_TYPE" == "other" ]]; then
-    echo "Unsupported platform (not Debian-like Linux or macOS). No installers available."
+    echo "Unsupported platform (not Debian-like Linux or macOS). No setup helpers available."
     exit 0
 fi
 
@@ -298,17 +298,17 @@ add_or_update_alias() {
     fi
 }
 
-install_with_installer() {
+run_setup_script() {
     local name="$1"
     local os="$2"
-    local path="$INSTALLERS_DIR/$os/$name.sh"
-    # Run installer if file exists; set executable bit if needed
+    local path="$SETUP_DIR/$os/$name.sh"
+    # Run setup script if file exists; set executable bit if needed
     if [[ -f "$path" ]]; then
         chmod +x "$path" || true
         "$path"
         return 0
     fi
-    echo "Warning: no installer for '$name' (expected $path)." >&2
+    echo "Warning: no setup script for '$name' (expected $path)." >&2
     return 1
 }
 
@@ -323,11 +323,11 @@ for i in "${!scripts[@]}"; do
                     if [[ -f "$SCRIPTS_DIR/$sub.sh" ]]; then
                         selected_scripts+=("$sub")
                         chmod +x "$SCRIPTS_DIR/$sub.sh"
-                        # If grouped has deps, attempt installer for each sub
+                        # If grouped has deps, attempt setup script for each sub
                         if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
-                            install_with_installer "$sub" "$OS_TYPE" || true
+                            run_setup_script "$sub" "$OS_TYPE" || true
                         else
-                            echo "No installer needed for '$sub'."
+                            echo "No setup script needed for '$sub'."
                         fi
                     fi
                 done
@@ -338,9 +338,9 @@ for i in "${!scripts[@]}"; do
                 fi
                 chmod +x "$SCRIPTS_DIR/$script_name.sh"
                 if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
-                    install_with_installer "$script_name" "$OS_TYPE" || true
+                    run_setup_script "$script_name" "$OS_TYPE" || true
                 else
-                    echo "No installer needed for '$script_name'."
+                    echo "No setup script needed for '$script_name'."
                 fi
             fi
             break

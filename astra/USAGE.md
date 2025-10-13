@@ -61,7 +61,7 @@ For content search, use the command palette (upcoming) or run ripgrep manually u
 
 ## Tips
 
-- Missing preview helpers (bat, chafa, pdftotext, ffprobe) show inline hints. Install using `installers/debian/astra.sh` or `installers/macos/astra.sh` for full fidelity.
+- Missing preview helpers (bat, chafa, pdftotext, ffprobe) show inline hints. Install using `setup/debian/astra.sh` or `setup/macos/astra.sh` for full fidelity.
 - State (history, last directory) persists in `${XDG_STATE_HOME:-~/.local/state}/astra/state.json`. Delete it if you want a reset.
 - Use `ASTRA_LOG_LEVEL=debug astra` when debugging key handling or preview issues.
 

@@ -45,8 +45,8 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 ## Why Bash Zoo
 
 - **Curated shortcuts** · Everything is battle-tested for fast terminal workflows.
-- **Zero-boilerplate install** · `install.sh` handles dependency checks, per-OS installers, and aliases.
-- **Portable by design** · Scripts are POSIX-friendly Bash and ship with Debian + macOS installers.
+- **Zero-boilerplate install** · `install.sh` handles dependency checks, per-OS setup helpers, and aliases.
+- **Portable by design** · Scripts are POSIX-friendly Bash and ship with Debian + macOS setup scripts.
 - **Pick-your-pack** · Install individual tools or the whole enclosure — nothing gets forced into your path.
 
 ## Tools at a Glance
@@ -88,7 +88,7 @@ Notes
 
 ### astra
 
-`astra` is a Bash-first terminal file manager that wraps `fzf`, `fd`, and `ripgrep` to stay fast while remaining approachable. The standalone UI streams directory listings through `fzf` with a live preview pane powered by `bat`, `chafa`, `pdftotext`, and friends. A static control panel now anchors to the bottom-right beneath the preview so shortcuts stay visible without crowding results. Core features include one-keystroke navigation, batch file operations, and JSON-based configuration. Headline keys: `Enter`/`→` to descend, `←`/`h` or the `[↑] ..` row to walk up, `.` to toggle hidden files, `Ctrl-G` for fuzzy name search, `Ctrl-Y` copy, `Alt-M` move, `Ctrl-D` delete, `Space` to tag multiple rows. See `astra/USAGE.md` for the full walkthrough. macOS and Debian users get the same code path; the installers pull in Homebrew or APT dependencies so previews “just work.”
+`astra` is a Bash-first terminal file manager that wraps `fzf`, `fd`, and `ripgrep` to stay fast while remaining approachable. The standalone UI streams directory listings through `fzf` with a live preview pane powered by `bat`, `chafa`, `pdftotext`, and friends. A static control panel now anchors to the bottom-right beneath the preview so shortcuts stay visible without crowding results. Core features include one-keystroke navigation, batch file operations, and JSON-based configuration. Headline keys: `Enter`/`→` to descend, `←`/`h` or the `[↑] ..` row to walk up, `.` to toggle hidden files, `Ctrl-G` for fuzzy name search, `Ctrl-Y` copy, `Alt-M` move, `Ctrl-D` delete, `Space` to tag multiple rows. See `astra/USAGE.md` for the full walkthrough. macOS and Debian users get the same code path; the setup scripts pull in Homebrew or APT dependencies so previews “just work.”
 
 ### forgit
 
@@ -114,7 +114,7 @@ Once the store contains at least one `*/mfa` entry, run `mfa`, fuzzy-search the 
 
 Security note: `mfa` never passes your secret as a command argument. It reads the single-line secret from `pass` and feeds it to `oathtool` via stdin to avoid exposure in process listings.
 
-> All installers live in `installers/<os>/<script>.sh` and match the script names one-to-one.
+> All setup scripts live in `setup/<os>/<script>.sh` and match the script names one-to-one.
 
 ### passage
 
@@ -174,10 +174,10 @@ cd bash-zoo
 ### Option B — Manual pick-and-run
 
 ```bash
-./installers/<os>/<script>.sh
+./setup/<os>/<script>.sh
 ```
 
-- OS-specific installers live under `installers/macos` and `installers/debian`
+- OS-specific setup scripts live under `setup/macos` and `setup/debian`
 - Scripts themselves sit in `scripts/` — copy or fork as needed
 - Aliases reference the project root, so keep it somewhere permanent (e.g. `~/bin/bash-zoo`)
 
