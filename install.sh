@@ -57,18 +57,33 @@ play_ascii_once() {
     return 0
   fi
 
-  local restore_cursor=0
+  # Terminal control helpers
+  local have_tput=0 used_alt=0
   if command -v tput >/dev/null 2>&1; then
-    if tput civis >/dev/null 2>&1; then
-      restore_cursor=1
-    fi
+    have_tput=1
+    # Enter alternate screen if supported (keeps main screen untouched)
+    if tput smcup 2>/dev/null; then used_alt=1; fi
+    # Hide cursor (no redirection; actually emit sequence)
+    tput civis 2>/dev/null || true
+  else
+    # Fallback: ANSI sequences
+    printf '\033[?1049h' && used_alt=1
+    printf '\033[?25l'
   fi
 
-  # Clear + home. Use ANSI CSI as a portable fallback if tput is unavailable
+  # Clear + home once, and a lightweight home-only command for subsequent frames
   local clear_cmd="printf '\033[2J\033[H'"
-  if command -v tput >/dev/null 2>&1; then
+  local home_cmd="printf '\033[H'"
+  if [[ $have_tput -eq 1 ]]; then
     clear_cmd="tput clear"
+    home_cmd="tput cup 0 0"
   fi
+
+  # Hold duration on last frame (seconds); default 1
+  local hold_secs="${BZ_ASCII_HOLD:-1}"
+  case "$hold_secs" in
+    ''|*[!0-9]*) hold_secs=1 ;;
+  esac
 
   local frames_dir="${BZ_ASCII_DIR:-$PWD/ascii/0xbenc}"
   local use_files=0
@@ -93,20 +108,25 @@ play_ascii_once() {
       use_files=0
     else
       local cycles=${BZ_ASCII_CYCLES:-1}
-      local i r
+      local i r first=1
       for (( r=1; r<=cycles; r++ )); do
         for (( i=1; i<=max_frames; i++ )); do
-          eval "$clear_cmd" || true
+          if (( first == 1 )); then eval "$clear_cmd" || true; first=0; else eval "$home_cmd" || true; fi
           if [[ -f "$frames_dir/frame_${i}.txt" ]]; then
             cat "$frames_dir/frame_${i}.txt"
           fi
           sleep 0.08
         done
       done
-      eval "$clear_cmd" || true
-      if [[ $restore_cursor -eq 1 ]]; then
-        tput cnorm >/dev/null 2>&1 || true
+      # Hold on last frame before restoring
+      sleep "$hold_secs"
+      # Restore screen and cursor
+      if [[ $used_alt -eq 1 ]]; then
+        if [[ $have_tput -eq 1 ]]; then tput rmcup 2>/dev/null || true; else printf '\033[?1049l'; fi
+      else
+        eval "$clear_cmd" || true
       fi
+      if [[ $have_tput -eq 1 ]]; then tput cnorm 2>/dev/null || true; else printf '\033[?25h'; fi
       return 0
     fi
   fi
@@ -205,18 +225,23 @@ EOF
     esac
   }
 
-  local i r
+  local i r first=1
   for r in 1 2; do
     for i in 0 1 2 3 4 5 6 7; do
-      eval "$clear_cmd" || true
+      if (( first == 1 )); then eval "$clear_cmd" || true; first=0; else eval "$home_cmd" || true; fi
       ascii_frame "$i"
       sleep 0.08
     done
   done
-  eval "$clear_cmd" || true
-  if [[ $restore_cursor -eq 1 ]]; then
-    tput cnorm >/dev/null 2>&1 || true
+  # Hold on last frame before restoring
+  sleep "$hold_secs"
+  # Restore screen and cursor
+  if [[ $used_alt -eq 1 ]]; then
+    if [[ $have_tput -eq 1 ]]; then tput rmcup 2>/dev/null || true; else printf '\033[?1049l'; fi
+  else
+    eval "$clear_cmd" || true
   fi
+  if [[ $have_tput -eq 1 ]]; then tput cnorm 2>/dev/null || true; else printf '\033[?25h'; fi
 }
 
 # Detect OS: debian-like linux, macOS, or other
