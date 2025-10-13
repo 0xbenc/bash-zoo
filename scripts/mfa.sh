@@ -415,9 +415,49 @@ main() {
   done
 
   local selection
-  if ! selection="$(choose_entry "$total")"; then
-    printf '%sEscape detected. Session closed.%s\n' "$DIM" "$RESET"
-    return 0
+  selection=""
+
+  # If the user supplied a path-like argument that exactly matches an entry,
+  # auto-select it and skip fzf. This restores the pre-fzf behavior while
+  # keeping the new interactive flow when no exact match is found.
+  if (( $# > 0 )); then
+    local query="$*"
+    # Normalize query: convert " > " to '/', drop extra spaces, strip trailing '/mfa'.
+    query="${query// > /\/}"
+    query="${query//>/\/}"  # handle cases like 'work>openai' → 'work/openai'
+    query="${query//  / }"
+    query="${query%/}"
+    if [[ "$query" == */mfa ]]; then
+      query="${query%/mfa}"
+    fi
+
+    # Try to find an exact match on the normalized path.
+    local matched_index=-1
+    for ((i=0; i<total; i++)); do
+      local ent norm
+      ent="${pass_entries[$i]}"
+      norm="$ent"
+      if [[ "$norm" == */mfa ]]; then
+        norm="${norm%/mfa}"
+      fi
+      if [[ "$norm" == "$query" || "$ent" == "$query" || "$ent" == "$query/mfa" ]]; then
+        matched_index=$i
+        break
+      fi
+    done
+
+    if (( matched_index >= 0 )); then
+      printf '%sAuto-selecting:%s %s%s%s\n' "$DIM" "$RESET" "$FG_GREEN" "${display_labels[$matched_index]}" "$RESET" >&2
+      selection="$matched_index"
+    fi
+  fi
+
+  # If no exact match from args, fall back to interactive chooser.
+  if [[ -z "$selection" ]]; then
+    if ! selection="$(choose_entry "$total")"; then
+      printf '%sEscape detected. Session closed.%s\n' "$DIM" "$RESET"
+      return 0
+    fi
   fi
 
   local selected_entry="${pass_entries[$selection]}"
