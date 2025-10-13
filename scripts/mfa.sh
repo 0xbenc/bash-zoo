@@ -311,14 +311,7 @@ show_result() {
   local pretty="$4"
   local copied="$5"
 
-  if [[ "$copied" -eq 0 ]]; then
-    printf '\n%s%sSuccess:%s Copied new MFA code.%s\n' "$FG_GREEN" "$BOLD" "$RESET" "$RESET"
-  else
-    printf '\n%sNotice:%s MFA code ready (clipboard unavailable).\n' "$FG_YELLOW" "$RESET"
-  fi
-  printf '%sEntry:%s %s%s%s\n' "$DIM" "$RESET" "$FG_BLUE" "$label" "$RESET"
-  printf '%sPass path:%s %s\n\n' "$DIM" "$RESET" "$entry"
-
+  
   if command -v figlet >/dev/null 2>&1; then
     local figlet_text
     figlet_text="$(printf '%s' "$pretty" | sed 's/ /  /g')"
