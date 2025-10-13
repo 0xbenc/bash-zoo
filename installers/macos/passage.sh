@@ -6,7 +6,7 @@ if ! command -v brew >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Installing dependencies for pass-browse (macOS via Homebrew)..."
+echo "Installing dependencies for passage (macOS via Homebrew)..."
 brew list gnupg >/dev/null 2>&1 || brew install gnupg
 brew list pinentry-mac >/dev/null 2>&1 || brew install pinentry-mac
 brew list pass >/dev/null 2>&1 || brew install pass
@@ -22,5 +22,4 @@ for cmd in pass fzf pbcopy; do
   fi
 done
 
-echo "pass-browse dependencies installed (macOS)."
-
+echo "passage dependencies installed (macOS)."

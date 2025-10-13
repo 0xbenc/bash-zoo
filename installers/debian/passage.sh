@@ -4,7 +4,7 @@ set -euo pipefail
 echo "Updating package list..."
 sudo apt update -y
 
-echo "Installing dependencies for pass-browse (Debian/Ubuntu)..."
+echo "Installing dependencies for passage (Debian/Ubuntu)..."
 sudo apt install -y pass fzf xclip wl-clipboard
 
 echo "Verifying installations..."
@@ -26,5 +26,4 @@ for opt in xclip wl-copy xsel; do
   fi
 done
 
-echo "pass-browse dependencies installed (Debian)."
-
+echo "passage dependencies installed (Debian)."

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# pass-browse: Interactive GNU Pass browser with pins + MRU and slot hotkeys
+# passage: Interactive GNU Pass browser with pins + MRU and slot hotkeys
 # Scope: Phase 1 + 4 only (no preview/TOTP). Requires: pass, fzf.
 
 PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
 
 # State (pins + MRU)
 STATE_DIR_DEFAULT="$HOME/.local/state"
-STATE_DIR="${XDG_STATE_HOME:-$STATE_DIR_DEFAULT}/bash-zoo/pass-browse"
+STATE_DIR="${XDG_STATE_HOME:-$STATE_DIR_DEFAULT}/bash-zoo/passage"
 STATE_FILE="$STATE_DIR/state.tsv"
 
 # Colors
@@ -57,6 +57,14 @@ state_paths=(); state_pins=(); state_used=()
 
 state_load() {
   ensure_state_dir
+  # Migrate old state file from pass-browse if present
+  if [[ ! -f "$STATE_FILE" ]]; then
+    local old_state
+    old_state="${XDG_STATE_HOME:-$STATE_DIR_DEFAULT}/bash-zoo/pass-browse/state.tsv"
+    if [[ -f "$old_state" ]]; then
+      cp -f "$old_state" "$STATE_FILE" 2>/dev/null || true
+    fi
+  fi
   state_paths=(); state_pins=(); state_used=()
   if [[ -f "$STATE_FILE" ]]; then
     while IFS=$'\t' read -r p pin used; do
@@ -70,7 +78,7 @@ state_load() {
 state_save() {
   ensure_state_dir
   local tmp
-  tmp=$(mktemp "${TMPDIR:-/tmp}/pass_browse_state.XXXXXX")
+  tmp=$(mktemp "${TMPDIR:-/tmp}/passage_state.XXXXXX")
   local i
   for i in "${!state_paths[@]}"; do
     printf '%s\t%s\t%s\n' "${state_paths[$i]}" "${state_pins[$i]}" "${state_used[$i]}" >> "$tmp"
@@ -138,10 +146,10 @@ discover_entries() {
 build_sorted_listing() {
   # Output: path<TAB>display
   local entries_tmp rows path pin used idx label star
-  entries_tmp=$(mktemp "${TMPDIR:-/tmp}/pass_browse_entries.XXXXXX")
+  entries_tmp=$(mktemp "${TMPDIR:-/tmp}/passage_entries.XXXXXX")
   discover_entries > "$entries_tmp"
 
-  rows=$(mktemp "${TMPDIR:-/tmp}/pass_browse_rows.XXXXXX")
+  rows=$(mktemp "${TMPDIR:-/tmp}/passage_rows.XXXXXX")
   while IFS= read -r path; do
     [[ -z "$path" ]] && continue
     pin=$(state_get_pin "$path")
@@ -157,23 +165,7 @@ build_sorted_listing() {
 pass_decrypt() { pass show -- "$1"; }
 parse_password() { local content="$1"; printf '%s' "${content%%$'\n'*}"; }
 
-parse_fields() {
-  # Input: full content; Output: key\tvalue lines
-  local content="$1" rest
-  if [[ "$content" == *$'\n'* ]]; then rest="${content#*$'\n'}"; else rest=""; fi
-  printf '%s' "$rest" | while IFS= read -r line; do
-    [[ -z "${line//[[:space:]]/}" ]] && continue
-    case "$line" in \#*) continue ;; esac
-    case "$line" in
-      *:*)
-        local k="${line%%:*}" v="${line#*:}"
-        k="${k#${k%%[![:space:]]*}}"; k="${k%${k##*[![:space:]]}}"
-        v="${v#${v%%[![:space:]]*}}"; v="${v%${v##*[![:space:]]}}"
-        [[ -n "$k" ]] && printf '%s\t%s\n' "$k" "$v"
-        ;;
-    esac
-  done
-}
+## parse_fields removed (field operations no longer supported)
 
 reveal_until_clear() {
   local title="$1" secret="$2"
@@ -194,20 +186,18 @@ actions_menu_once() {
   pin=$(state_get_pin "$path")
 
   local tmp key_line sel_line header expect_keys out
-  tmp=$(mktemp "${TMPDIR:-/tmp}/pass_browse_actions.XXXXXX")
+  tmp=$(mktemp "${TMPDIR:-/tmp}/passage_actions.XXXXXX")
   printf 'Copy password\n' >> "$tmp"
   printf 'Reveal password\n' >> "$tmp"
-  printf 'Copy field\n' >> "$tmp"
-  printf 'Reveal field\n' >> "$tmp"
   if [[ "$pin" == "1" ]]; then printf 'Unpin\n' >> "$tmp"; else printf 'Pin\n' >> "$tmp"; fi
   printf 'Clear clipboard\n' >> "$tmp"
   printf 'Back\n' >> "$tmp"
   printf 'Quit\n' >> "$tmp"
 
-  header=$(printf '%sKeys:%s Alt/Ctrl-c=Copy  Alt/Ctrl-r=Reveal  Alt/Ctrl-f=Copy field  Alt/Ctrl-F=Reveal field  Alt/Ctrl-p=Pin  Alt/Ctrl-x=Clear  Alt/Ctrl-b=Back  Alt/Ctrl-q=Quit' "$BOLD$FG_CYAN" "$RESET")
-  expect_keys="enter,esc,alt-c,alt-r,alt-f,alt-F,alt-p,alt-x,alt-b,alt-q,ctrl-c,ctrl-r,ctrl-f,ctrl-F,ctrl-p,ctrl-x,ctrl-b,ctrl-q"
+  header=$(printf '%sKeys:%s Alt/Ctrl-c=Copy  Alt/Ctrl-r=Reveal  Alt/Ctrl-p=Pin  Alt/Ctrl-x=Clear  Alt/Ctrl-b=Back  Alt/Ctrl-q=Quit' "$BOLD$FG_CYAN" "$RESET")
+  expect_keys="enter,esc,alt-c,alt-r,alt-p,alt-x,alt-b,alt-q,ctrl-c,ctrl-r,ctrl-p,ctrl-x,ctrl-b,ctrl-q"
 
-  out=$(mktemp "${TMPDIR:-/tmp}/pass_browse_actions_out.XXXXXX")
+  out=$(mktemp "${TMPDIR:-/tmp}/passage_actions_out.XXXXXX")
   if ! fzf --prompt "${BOLD}${FG_MAGENTA}Actions:${RESET} " --height=40% --layout=reverse --border --info=hidden --no-sort \
         --header "$header" --expect="$expect_keys" < "$tmp" > "$out"; then
     rm -f "$tmp" "$out"; return 1
@@ -225,19 +215,7 @@ actions_menu_once() {
       local cr pr; cr=$(pass_decrypt "$path") || die "Failed to decrypt '$path'."; pr="$(parse_password "$cr")"
       if copy_to_clipboard "$pr"; then msg_note "Also copied to clipboard."; else msg_warn "No clipboard tool found; reveal only."; fi
       state_touch "$path"; state_save; reveal_until_clear "$(format_label "$path")" "$pr"; return 0 ;;
-    alt-f|ctrl-f)
-      local cf ff kv k v; cf=$(pass_decrypt "$path") || die "Failed to decrypt '$path'."; ff=$(mktemp "${TMPDIR:-/tmp}/pass_browse_fields.XXXXXX")
-      parse_fields "$cf" > "$ff"; [[ -s "$ff" ]] || { rm -f "$ff"; msg_warn "No 'key: value' fields in entry."; return 0; }
-      if kv=$(awk -F $'\t' '{print $1" \t"$2}' "$ff" | fzf --prompt "${BOLD}${FG_MAGENTA}Field:${RESET} " --with-nth=1 --delimiter=$'\t' --height=50% --layout=reverse --border --no-sort); then
-        k="${kv%%$'\t'*}"; v="${kv#*$'\t'}"; if copy_to_clipboard "$v"; then state_touch "$path"; state_save; msg_ok "Copied field '$k' to clipboard."; else msg_warn "No clipboard tool found."; fi
-      fi; rm -f "$ff"; return 0 ;;
-    alt-F|ctrl-F)
-      local cF fF kvF kF vF; cF=$(pass_decrypt "$path") || die "Failed to decrypt '$path'."; fF=$(mktemp "${TMPDIR:-/tmp}/pass_browse_fields.XXXXXX")
-      parse_fields "$cF" > "$fF"; [[ -s "$fF" ]] || { rm -f "$fF"; msg_warn "No 'key: value' fields in entry."; return 0; }
-      if kvF=$(awk -F $'\t' '{print $1" \t"$2}' "$fF" | fzf --prompt "${BOLD}${FG_MAGENTA}Field:${RESET} " --with-nth=1 --delimiter=$'\t' --height=50% --layout=reverse --border --no-sort); then
-        kF="${kvF%%$'\t'*}"; vF="${kvF#*$'\t'}"; if copy_to_clipboard "$vF"; then msg_note "Also copied to clipboard."; else msg_warn "No clipboard tool found; reveal only."; fi
-        state_touch "$path"; state_save; reveal_until_clear "$(format_label "$path") — $kF" "$vF"
-      fi; rm -f "$fF"; return 0 ;;
+    # field operations removed
     alt-p|ctrl-p) state_toggle_pin "$path"; state_save; msg_ok "Pin toggled."; return 0 ;;
     alt-x|ctrl-x) if copy_to_clipboard ""; then msg_ok "Clipboard cleared."; else msg_warn "No clipboard tool found."; fi; return 0 ;;
     alt-b|ctrl-b) return 0 ;;
@@ -254,19 +232,7 @@ actions_menu_once() {
       content=$(pass_decrypt "$path") || die "Failed to decrypt '$path'."; password="$(parse_password "$content")"
       if copy_to_clipboard "$password"; then msg_note "Also copied to clipboard."; else msg_warn "No clipboard tool found; reveal only."; fi
       state_touch "$path"; state_save; reveal_until_clear "$(format_label "$path")" "$password" ;;
-    "Copy field")
-      content=$(pass_decrypt "$path") || die "Failed to decrypt '$path'."; local f kv selk selv; f=$(mktemp "${TMPDIR:-/tmp}/pass_browse_fields.XXXXXX")
-      parse_fields "$content" > "$f"; [[ -s "$f" ]] || { rm -f "$f"; msg_warn "No 'key: value' fields in entry."; return 0; }
-      if kv=$(awk -F $'\t' '{print $1" \t"$2}' "$f" | fzf --prompt "${BOLD}${FG_MAGENTA}Field:${RESET} " --with-nth=1 --delimiter=$'\t' --height=50% --layout=reverse --border --no-sort); then
-        selk="${kv%%$'\t'*}"; selv="${kv#*$'\t'}"; if copy_to_clipboard "$selv"; then state_touch "$path"; state_save; msg_ok "Copied field '$selk' to clipboard."; else msg_warn "No clipboard tool found."; fi
-      fi; rm -f "$f" ;;
-    "Reveal field")
-      content=$(pass_decrypt "$path") || die "Failed to decrypt '$path'."; local f2 kv2 key2 val2; f2=$(mktemp "${TMPDIR:-/tmp}/pass_browse_fields.XXXXXX")
-      parse_fields "$content" > "$f2"; [[ -s "$f2" ]] || { rm -f "$f2"; msg_warn "No 'key: value' fields in entry."; return 0; }
-      if kv2=$(awk -F $'\t' '{print $1" \t"$2}' "$f2" | fzf --prompt "${BOLD}${FG_MAGENTA}Field:${RESET} " --with-nth=1 --delimiter=$'\t' --height=50% --layout=reverse --border --no-sort); then
-        key2="${kv2%%$'\t'*}"; val2="${kv2#*$'\t'}"; if copy_to_clipboard "$val2"; then msg_note "Also copied to clipboard."; else msg_warn "No clipboard tool found; reveal only."; fi
-        state_touch "$path"; state_save; reveal_until_clear "$(format_label "$path") — $key2" "$val2"
-      fi; rm -f "$f2" ;;
+    # field operations removed
     Pin)   state_set_pin "$path" 1; state_save; msg_ok "Pinned." ;;
     Unpin) state_set_pin "$path" 0; state_save; msg_ok "Unpinned." ;;
     "Clear clipboard") if copy_to_clipboard ""; then msg_ok "Clipboard cleared."; else msg_warn "No clipboard tool found."; fi ;;
@@ -278,7 +244,7 @@ actions_menu_once() {
 
 options_menu_once() {
   local tmp sel
-  tmp=$(mktemp "${TMPDIR:-/tmp}/pass_browse_opt.XXXXXX")
+  tmp=$(mktemp "${TMPDIR:-/tmp}/passage_opt.XXXXXX")
   printf 'Unpin all\n' >> "$tmp"; printf 'Clear recents\n' >> "$tmp"; printf 'Back\n' >> "$tmp"
   sel=""; if ! sel=$(fzf --prompt "${BOLD}${FG_MAGENTA}Options:${RESET} " --height=30% --layout=reverse --border --info=hidden --no-sort < "$tmp"); then rm -f "$tmp"; return 1; fi
   rm -f "$tmp"
@@ -294,10 +260,10 @@ main_loop() {
     header=$(printf '%sKeys:%s Enter=Actions  Ctrl+Letter=Actions  Alt+Letter=Copy  Alt+Shift+Letter=Reveal  Alt-p=Pin/Unpin  Alt-o=Options  Esc=Quit' "$BOLD$FG_CYAN" "$RESET")
     prompt=$(printf '%s:: Search >%s ' "$BOLD$FG_MAGENTA" "$RESET")
 
-    local listing; listing=$(mktemp "${TMPDIR:-/tmp}/pass_browse_list.XXXXXX"); build_sorted_listing > "$listing"
+    local listing; listing=$(mktemp "${TMPDIR:-/tmp}/passage_list.XXXXXX"); build_sorted_listing > "$listing"
     [[ -s "$listing" ]] || { rm -f "$listing"; die "No pass entries found under '$PASSWORD_STORE_DIR'."; }
 
-    local tmp_input tmp_bind; tmp_input=$(mktemp "${TMPDIR:-/tmp}/pass_browse_input.XXXXXX"); tmp_bind=$(mktemp "${TMPDIR:-/tmp}/pass_browse_bind.XXXXXX")
+    local tmp_input tmp_bind; tmp_input=$(mktemp "${TMPDIR:-/tmp}/passage_input.XXXXXX"); tmp_bind=$(mktemp "${TMPDIR:-/tmp}/passage_bind.XXXXXX")
     local idx=0 p d slot
     while IFS=$'\t' read -r p d; do
       slot="$(index_to_choice_key "$idx")"
@@ -317,7 +283,7 @@ main_loop() {
     done < "$tmp_bind"
 
     local expect_arg; expect_arg=$(printf '%s,' "${expect_keys[@]}"); expect_arg=${expect_arg%,}
-    local tmpout; tmpout=$(mktemp "${TMPDIR:-/tmp}/pass_browse_out.XXXXXX")
+    local tmpout; tmpout=$(mktemp "${TMPDIR:-/tmp}/passage_out.XXXXXX")
     if ! fzf --ansi --with-nth=2,3 --delimiter=$'\t' \
          --prompt "$prompt" --height=80% --layout=reverse --border --info=inline \
          --header "$header" --no-sort --tiebreak=index --expect="$expect_arg" \
@@ -351,4 +317,3 @@ main_loop() {
 main() { require_deps; state_load; main_loop; }
 
 main "$@"
-

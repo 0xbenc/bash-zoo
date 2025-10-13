@@ -33,7 +33,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
   - [zapp](#zapp)
   - [zapper](#zapper)
   - [mfa](#mfa)
-  - [pass-browse](#pass-browse)
+  - [passage](#passage)
 - [Installation](#installation)
 - [Platform Support](#platform-support)
 - [Daily Use](#daily-use)
@@ -61,7 +61,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 | `zapp` | Launch an AppImage or unpacked app stored under `~/zapps` | Debian/Ubuntu | none |
 | `zapper` | Prepare, validate, and register new apps for `zapp` with desktop entries | Debian/Ubuntu | `desktop-file-utils` |
 | `forgit` | Scan directories for Git repos needing commits or pushes | macOS, Debian/Ubuntu | `git` |
-| `pass-browse` | Interactive GNU Pass browser with pins and MRU; copy or reveal fields | macOS, Debian/Ubuntu | `pass`, `fzf`, platform clipboard utility |
+| `passage` | Interactive GNU Pass browser with pins and MRU; copy or reveal password | macOS, Debian/Ubuntu | `pass`, `fzf`, platform clipboard utility |
 
 ## Tool Details
 
@@ -132,13 +132,12 @@ Security note: `mfa` never passes your secret as a command argument. It reads th
 
 > All installers live in `installers/<os>/<script>.sh` and match the script names one-to-one.
 
-### pass-browse
+### passage
 
-`pass-browse` is an interactive browser for your GNU Pass store. It lists entries with fuzzy search, supports favorites (pins) and MRU ordering, and lets you:
+`passage` is an interactive browser for your GNU Pass store. It lists entries with fuzzy search, supports favorites (pins) and MRU ordering, and lets you:
 
 - Copy the password (first line) directly.
 - Reveal the password on screen until you clear it (also copies to clipboard).
-- Copy or reveal any `key: value` field from the entry body.
 - Toggle pin on an entry; pinned entries sort first.
 
 Notes
@@ -153,8 +152,6 @@ Notes
  - Actions menu mnemonics:
    - Alt/Ctrl-c: Copy password
    - Alt/Ctrl-r: Reveal password
-   - Alt/Ctrl-f: Copy field (prompts for key)
-   - Alt/Ctrl-F: Reveal field (prompts for key)
    - Alt/Ctrl-p: Pin/Unpin
    - Alt/Ctrl-x: Clear clipboard
    - Alt/Ctrl-b: Back
@@ -196,7 +193,7 @@ cd bash-zoo
 | `uuid` | ⛔️ | ✅ |
 | `zapp` + `zapper` | ⛔️ | ✅ |
 | `forgit` | ✅ | ✅ |
-| `pass-browse` | ✅ | ✅ |
+| `passage` | ✅ | ✅ |
 | `airplane` | ⛔️ | ✅ |
 | `install.sh` | ✅ *(Homebrew required for dependencies)* | ✅ *(APT and friends)* |
 
