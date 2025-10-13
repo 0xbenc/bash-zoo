@@ -123,6 +123,7 @@ item_ids=()
 item_labels=()
 item_kinds=()     # alias | bin
 item_payloads=()  # alias: space-separated base indices; bin: space-separated fullpaths
+item_summaries=() # short names printed in UI summary
 
 visited=()
 
@@ -132,6 +133,19 @@ push_item() {
   item_labels+=("$2")
   item_kinds+=("$3")
   item_payloads+=("$4")
+  local summary="${5-}"
+  if [[ -z "$summary" ]]; then
+    # Derive a minimal name from the label
+    local derived="$2"
+    derived=${derived#Aliases: }
+    derived=${derived#Alias: }
+    derived=${derived#Binaries: }
+    derived=${derived#Binary: }
+    derived=${derived%% at *}
+    derived=${derived%% → *}
+    summary="$derived"
+  fi
+  item_summaries+=("$summary")
 }
 
 # Find all indices for zapp/zapper
@@ -146,14 +160,34 @@ done
 if [[ ${#zapps_idxs[@]} -gt 0 ]]; then
   # Create one grouped entry for whatever exists among the pair
   list="${zapps_idxs[*]}"
-  push_item "grp-zapps-alias" "Aliases: zapps (zapp + zapper)" "alias" "$list"
+  # Build a precise label with only present names
+  present_names=()
+  for idx in ${zapps_idxs[*]}; do
+    sname_i="${script_names[$idx]}"
+    # Deduplicate while preserving order (zapp/zapper appear few times)
+    already=0
+    for n in "${present_names[@]:-}"; do [[ "$n" == "$sname_i" ]] && already=1 && break; done
+    if [[ $already -eq 0 ]]; then present_names+=("$sname_i"); fi
+  done
+  label_suffix=""
+  if [[ ${#present_names[@]} -eq 1 ]]; then
+    label_suffix="${present_names[0]}"
+  else
+    # Join with ' + '
+    join=""
+    for n in "${present_names[@]}"; do
+      if [[ -z "$join" ]]; then join="$n"; else join="$join + $n"; fi
+    done
+    label_suffix="$join"
+  fi
+  push_item "grp-zapps-alias" "Aliases: $label_suffix" "alias" "$list" "$label_suffix"
   for idx in ${zapps_idxs[*]}; do visited[$idx]=1; done
 fi
 
 # Add remaining individual items
 for i in "${!alias_names[@]}"; do
   if [[ ${visited[$i]:-0} -eq 1 ]]; then continue; fi
-  push_item "alias-$i" "Alias: ${alias_names[$i]} → scripts/${script_names[$i]}.sh (${rc_display[$i]})" "alias" "$i"
+  push_item "alias-$i" "Alias: ${alias_names[$i]} → scripts/${script_names[$i]}.sh (${rc_display[$i]})" "alias" "$i" "${alias_names[$i]}"
 done
 
 # Collect installed binaries in bin dirs
@@ -176,17 +210,34 @@ done
 
 # Group zapps binaries into one item
 zapps_bin_paths=()
-zapps_bin_labels=()
+zapps_bin_names=()
 for i in "${!bin_scripts[@]}"; do
   sname="${bin_scripts[$i]}"
   if [[ "$sname" == "zapp" || "$sname" == "zapper" ]]; then
     zapps_bin_paths+=("${bin_paths[$i]}")
+    zapps_bin_names+=("$sname")
   fi
 done
 if [[ ${#zapps_bin_paths[@]} -gt 0 ]]; then
-  # Compose a label showing dirs succinctly
-  disp="Binaries: zapps (zapp + zapper)"
-  push_item "grp-zapps-bin" "$disp" "bin" "${zapps_bin_paths[*]}"
+  # Compose a label with only present names
+  present_bin_names=()
+  for nm in "${zapps_bin_names[@]}"; do
+    already=0
+    for n in "${present_bin_names[@]:-}"; do [[ "$n" == "$nm" ]] && already=1 && break; done
+    if [[ $already -eq 0 ]]; then present_bin_names+=("$nm"); fi
+  done
+  if [[ ${#present_bin_names[@]} -eq 1 ]]; then
+    disp="Binaries: ${present_bin_names[0]}"
+    summary_bin="${present_bin_names[0]}"
+  else
+    join=""
+    for n in "${present_bin_names[@]}"; do
+      if [[ -z "$join" ]]; then join="$n"; else join="$join + $n"; fi
+    done
+    disp="Binaries: $join"
+    summary_bin="$join"
+  fi
+  push_item "grp-zapps-bin" "$disp" "bin" "${zapps_bin_paths[*]}" "$summary_bin"
 fi
 
 # Add remaining individual binaries
@@ -202,7 +253,7 @@ for i in "${!bin_paths[@]}"; do
   case "$pdir" in
     "$HOME"/*) pdir="~${pdir#$HOME}" ;;
   esac
-  push_item "bin-$sname" "Binary: $sname at $pdir" "bin" "$bpath"
+  push_item "bin-$sname" "Binary: $sname at $pdir" "bin" "$bpath" "$sname"
 done
 
 if [[ ${#item_ids[@]} -eq 0 ]]; then
@@ -221,7 +272,9 @@ else
     id="${item_ids[$j]}"
     label="${item_labels[$j]}"
     esc_label=$(printf '%s' "$label" | sed 's/"/\\"/g')
-    payload+="{\"name\":\"$id\",\"message\":\"$esc_label\"},"
+    summary="${item_summaries[$j]}"
+    esc_summary=$(printf '%s' "$summary" | sed 's/"/\\"/g')
+    payload+="{\"name\":\"$id\",\"message\":\"$esc_label\",\"summary\":\"$esc_summary\"},"
   done
   payload=${payload%,}
   payload+='] }'
@@ -296,11 +349,14 @@ for sel in "${selected_ids[@]}"; do
           name="${alias_names[$idx]}"
           script="${script_names[$idx]}"
           delete_alias_line "$rc_file" "$name" "$script"
-          ((removed++))
+          ((removed+=1))
         done
       else
         for f in $payload; do
-          if [[ -e "$f" ]]; then rm -f "$f" && ((removed++)); fi
+          if [[ -e "$f" ]]; then
+            rm -f "$f"
+            ((removed+=1))
+          fi
         done
       fi
       break

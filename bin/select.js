@@ -49,6 +49,7 @@ async function main() {
     name: String(c.name),
     message: c.message ? String(c.message) : String(c.name),
     value: String(c.name),
+    summary: c.summary ? String(c.summary) : String(c.message || c.name),
   }));
 
   const prompt = new MultiSelect({
@@ -68,6 +69,15 @@ async function main() {
     // Route UI rendering to stderr so stdout stays clean for results
     stdin: process.stdin,
     stdout: process.stderr,
+    // Show a clean summary with only actual names when submitted
+    format() {
+      try {
+        const sel = this.selected || [];
+        return sel.map((c) => c.summary || c.message || c.name).join(', ');
+      } catch {
+        return '';
+      }
+    },
   });
 
   try {
