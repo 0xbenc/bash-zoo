@@ -10,10 +10,10 @@ echo "Installing dependencies for passage (macOS via Homebrew)..."
 brew list gnupg >/dev/null 2>&1 || brew install gnupg
 brew list pinentry-mac >/dev/null 2>&1 || brew install pinentry-mac
 brew list pass >/dev/null 2>&1 || brew install pass
-brew list fzf >/dev/null 2>&1 || brew install fzf
+:
 
 echo "Verifying installations..."
-for cmd in pass fzf pbcopy; do
+for cmd in pass pbcopy; do
   if command -v "$cmd" >/dev/null 2>&1; then
     echo "  - $cmd OK"
   else

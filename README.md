@@ -57,7 +57,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 | `astra` | Terminal file manager with fuzzy search and previews | macOS, Debian/Ubuntu | `bash`, `fzf`, `jq`, `fd`/`fd-find`, `ripgrep`, `bat`, `chafa`, `poppler-utils`, `atool` |
 | `forgit` | Scan directories for Git repos needing commits or pushes | macOS, Debian/Ubuntu | `git` |
 | `mfa` | Generate TOTP codes from `pass` and copy them to your clipboard | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
-| `passage` | Interactive GNU Pass browser with pins and MRU; copy or reveal password | macOS, Debian/Ubuntu | `pass`, `fzf`, platform clipboard utility |
+| `passage` | Interactive GNU Pass browser with pins and MRU; copy or reveal password | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
 | `share` | Secure one-time file, folder, or clipboard transfer through a relay | Debian/Ubuntu | `curl`, `openssl`, `socat` |
 | `uuid` | Create and copy a fresh UUID without leaving the terminal | Debian/Ubuntu | `xclip` |
 | `zapp` | Launch an AppImage or unpacked app stored under `~/zapps` | Debian/Ubuntu | none |
@@ -118,26 +118,22 @@ Security note: `mfa` never passes your secret as a command argument. It reads th
 
 ### passage
 
-`passage` is an interactive browser for your GNU Pass store. It lists entries with fuzzy search, supports favorites (pins) and MRU ordering, and uses a persistent right-side preview to show instructions and results without leaving the main list. You can:
+`passage` is an interactive browser for your GNU Pass store. It lists entries with search, supports favorites (pins) and MRU ordering, and uses a simple text menu (no fzf). You can:
 
 - Copy the password (first line) directly.
 - Reveal the password on screen until you clear it (also copies to clipboard).
 - Toggle pin on an entry; pinned entries sort first.
 
 Notes
-- Requires `pass` and `fzf` and a clipboard adapter (`pbcopy`, `wl-copy`, `xclip`, or `xsel`).
+- Requires `pass` and a clipboard adapter (`pbcopy`, `wl-copy`, `xclip`, or `xsel`).
 - No TOTP (use `mfa` for TOTP codes).
 - Safe defaults: no secrets printed unless you choose Reveal.
-- Keys (act on current selection; preview shows results):
-  - `c`: Copy password (stays in fzf, preview shows “Copied”).
-  - `r`: Reveal password in preview (also copies). `h` or `b` hides.
-  - `p`: Pin/Unpin current entry (list reloads to reflect order).
-  - `O`: Unpin all; `R`: Clear recents.
-  - `x`: Clear clipboard.
-  - `Esc`: Quit.
-- Slot hotkeys (fast index jump like `mfa`):
-  - `Ctrl+Letter` or `Alt+Letter`: copy that slot; `Alt+Shift+Letter`: reveal that slot.
-  - These operate in-place and update the side preview.
+- Commands:
+  - Type a number to select an entry; then choose an action (Enter copies by default).
+  - `rN` reveal entry `N` (also copies). `pN` pin/unpin entry `N`.
+  - `/term` filter list by substring; empty filter shows all again.
+  - `O` via Options menu clears pins; `R` via Options menu clears recents.
+  - `x` clears clipboard; `o` opens options; `q` quits.
 
 ### share
 

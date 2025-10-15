@@ -5,10 +5,10 @@ echo "Updating package list..."
 sudo apt update -y
 
 echo "Installing dependencies for passage (Debian/Ubuntu)..."
-sudo apt install -y pass fzf xclip wl-clipboard
+sudo apt install -y pass xclip wl-clipboard
 
 echo "Verifying installations..."
-for cmd in pass fzf; do
+for cmd in pass; do
   if command -v "$cmd" >/dev/null 2>&1; then
     echo "  - $cmd OK"
   else

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# passage: Interactive GNU Pass browser with pins + MRU and slot hotkeys
-# UX: Single fzf with right-side preview; no nested menus; no TOTP.
-# Requires: pass, fzf, and a clipboard tool (pbcopy/wl-copy/xclip/xsel).
+# passage: Interactive GNU Pass browser with pins + MRU
+# UX: Simple text menu (no fzf); no nested preview; no TOTP.
+# Requires: pass and a clipboard tool (pbcopy/wl-copy/xclip/xsel).
 
 PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
 
@@ -47,21 +47,8 @@ epoch_to_hms() {
 
 ensure_state_dir() { mkdir -p "$STATE_DIR"; }
 
-# Slot letters for quick-select (skip 'c' like mfa)
-CHOICE_SYMBOLS=(a b d e f g h i j k l m n o p q r s t u v w x y z)
-CHOICE_SYMBOL_COUNT=${#CHOICE_SYMBOLS[@]}
-
-index_to_choice_key() {
-  local idx="$1" key="" remainder char
-  while true; do
-    remainder=$((idx % CHOICE_SYMBOL_COUNT))
-    char="${CHOICE_SYMBOLS[$remainder]}"
-    key="$char$key"
-    idx=$(((idx / CHOICE_SYMBOL_COUNT) - 1))
-    (( idx < 0 )) && break
-  done
-  printf '%s' "$key"
-}
+# Lowercase helper
+to_lower() { tr '[:upper:]' '[:lower:]'; }
 
 # In-memory state
 state_paths=(); state_pins=(); state_used=()
@@ -138,12 +125,34 @@ state_clear_recents() { local i; for i in "${!state_used[@]}"; do state_used[$i]
 
 format_label() { local entry="$1"; printf '%s' "${entry//\// > }"; }
 
-copy_to_clipboard() {
+CLIPBOARD_TOOL_LAST=""
+clipboard_copy() {
   local text="$1"
-  if command -v pbcopy >/dev/null 2>&1; then printf '%s' "$text" | pbcopy; return 0; fi
-  if command -v wl-copy >/dev/null 2>&1; then printf '%s' "$text" | wl-copy; return 0; fi
-  if command -v xclip   >/dev/null 2>&1; then printf '%s' "$text" | xclip -selection clipboard; return 0; fi
-  if command -v xsel    >/dev/null 2>&1; then printf '%s' "$text" | xsel --clipboard --input; return 0; fi
+  CLIPBOARD_TOOL_LAST=""
+  if command -v pbcopy >/dev/null 2>&1; then
+    if printf '%s' "$text" | pbcopy >/dev/null 2>&1; then CLIPBOARD_TOOL_LAST="pbcopy"; return 0; fi
+  fi
+  # Choose order based on session
+  local try_wayland=0
+  if [[ -n "${WAYLAND_DISPLAY-}" ]]; then try_wayland=1; fi
+  if (( try_wayland )); then
+    if command -v wl-copy >/dev/null 2>&1; then
+      if printf '%s' "$text" | wl-copy >/dev/null 2>&1; then CLIPBOARD_TOOL_LAST="wl-copy"; return 0; fi
+    fi
+    if command -v xclip >/dev/null 2>&1; then
+      if printf '%s' "$text" | xclip -selection clipboard >/dev/null 2>&1; then CLIPBOARD_TOOL_LAST="xclip"; return 0; fi
+    fi
+  else
+    if command -v xclip >/dev/null 2>&1; then
+      if printf '%s' "$text" | xclip -selection clipboard >/dev/null 2>&1; then CLIPBOARD_TOOL_LAST="xclip"; return 0; fi
+    fi
+    if command -v wl-copy >/dev/null 2>&1; then
+      if printf '%s' "$text" | wl-copy >/dev/null 2>&1; then CLIPBOARD_TOOL_LAST="wl-copy"; return 0; fi
+    fi
+  fi
+  if command -v xsel >/dev/null 2>&1; then
+    if printf '%s' "$text" | xsel --clipboard --input >/dev/null 2>&1; then CLIPBOARD_TOOL_LAST="xsel"; return 0; fi
+  fi
   return 1
 }
 
@@ -182,228 +191,189 @@ msg_ok()   { printf '%s%sOK:%s %s\n' "$FG_GREEN" "$BOLD" "$RESET" "$1" >&2; }
 msg_note() { printf '%s%sNote:%s %s\n' "$FG_BLUE" "$BOLD" "$RESET" "$1" >&2; }
 msg_warn() { printf '%s%sWarn:%s %s\n' "$FG_YELLOW" "$BOLD" "$RESET" "$1" >&2; }
 
-# Preview helpers via subcommands
-preview_render_line() {
-  # Input: one TSV line: idx, slot, display, path, pin, used
-  local line="$1"
-  local idx slot display path pin used
-  IFS=$'\t' read -r idx slot display path pin used <<< "$line"
-  # Header with key cheatsheet
-  printf '%sKeys:%s c=Copy  r=Reveal  p=Pin/Unpin  O=Unpin-all  R=Clear-recents  x=Clear-clipboard  b/h=Hide  Esc=Quit\n' "$BOLD$FG_CYAN" "$RESET"
-  printf '\n'
-  if [[ -z "${path:-}" ]]; then
-    printf '%sSelect an entry to view actions.%s\n' "$DIM" "$RESET"
-    return 0
-  fi
-  # Entry details
-  printf '%sEntry:%s %s\n' "$BOLD$FG_MAGENTA" "$RESET" "$display"
-  printf '%sPath:%s  %s\n' "$DIM" "$RESET" "$path"
-  local used_h
-  used_h="$(epoch_to_hms "${used:-0}")"
-  printf '%sPinned:%s %s   %sLast Used:%s %s\n' "$DIM" "$RESET" "${pin:-0}" "$DIM" "$RESET" "$used_h"
-  printf '\n'
-  # Mode/data files
-  local mode_file data_file mode
-  mode_file="${PREVIEW_MODE_FILE-}"
-  data_file="${PREVIEW_DATA_FILE-}"
-  if [[ -n "${mode_file}" && -f "$mode_file" ]]; then
-    mode="$(cat "$mode_file" 2>/dev/null || printf 'help')"
+reveal_until_clear() {
+  local title="$1" secret="$2"
+  if command -v tput >/dev/null 2>&1; then tput clear; else printf '\033[2J\033[H'; fi
+  printf '%s%sReveal:%s %s\n\n' "$BOLD" "$FG_MAGENTA" "$RESET" "$title"
+  printf '%s%s%s\n\n' "$BOLD" "$FG_CYAN" "$secret" "$RESET"
+  printf '%sPress Enter to clear...%s\n' "$DIM" "$RESET"
+  read -r -s _
+  if command -v tput >/dev/null 2>&1; then tput clear; else printf '\033[2J\033[H'; fi
+}
+
+require_deps() { command -v pass >/dev/null 2>&1 || die "Missing dependency: pass"; }
+
+# Load current listing into arrays, optionally filtered by a substring.
+list_paths=(); list_displays=(); list_pins=(); list_used=()
+load_listing_arrays() {
+  local filter="${1-}"
+  list_paths=(); list_displays=(); list_pins=(); list_used=()
+  if [[ -z "$filter" ]]; then
+    while IFS=$'\t' read -r p d pin used; do
+      list_paths+=("$p"); list_displays+=("$d"); list_pins+=("$pin"); list_used+=("$used")
+    done < <(build_sorted_listing)
   else
-    mode="help"
+    local f_lc p_lc d_lc
+    f_lc=$(printf '%s' "$filter" | to_lower)
+    while IFS=$'\t' read -r p d pin used; do
+      p_lc=$(printf '%s' "$p" | to_lower)
+      d_lc=$(printf '%s' "$d" | to_lower)
+      if [[ "$p_lc" == *"$f_lc"* || "$d_lc" == *"$f_lc"* ]]; then
+        list_paths+=("$p"); list_displays+=("$d"); list_pins+=("$pin"); list_used+=("$used")
+      fi
+    done < <(build_sorted_listing)
   fi
-  case "$mode" in
-    result:copy)
-      printf '%s%sOK:%s Password copied.%s\n' "$FG_GREEN" "$BOLD" "$RESET" "$RESET"
-      if [[ -f "$data_file" ]]; then
-        printf '%s%s%s\n' "$DIM" "$(cat "$data_file" 2>/dev/null | head -n 1)" "$RESET"
-      fi
-      ;;
-    result:reveal)
-      printf '%s%sRevealed Password%s\n\n' "$BOLD" "$FG_MAGENTA" "$RESET"
-      if [[ -f "$data_file" ]]; then
-        printf '%s%s%s\n\n' "$BOLD$FG_CYAN" "$(cat "$data_file" 2>/dev/null | head -n 1)" "$RESET"
-      fi
-      printf '%sPress h to hide from preview.%s\n' "$DIM" "$RESET"
-      ;;
-    note)
-      if [[ -f "$data_file" ]]; then
-        cat "$data_file" 2>/dev/null
-      fi
-      ;;
-    *)
-      printf '%sActions:%s\n' "$BOLD" "$RESET"
-      printf '  c  Copy password to clipboard\n'
-      printf '  r  Reveal password in this preview (also copies)\n'
-      printf '  p  Toggle pin for this entry\n'
-      printf '  O  Unpin all  |  R  Clear recents\n'
-      printf '  x  Clear clipboard  |  h  Hide preview result\n'
-      ;;
+}
+
+print_listing() {
+  local total=${#list_paths[@]}
+  local i used_h star
+  printf '%sEntries:%s %s%d%s\n' "$BOLD$FG_CYAN" "$RESET" "$FG_GREEN" "$total" "$RESET"
+  for ((i=0; i<total; i++)); do
+    star=""; [[ "${list_pins[$i]}" == "1" ]] && star="${FG_YELLOW}★ ${RESET}"
+    used_h="$(epoch_to_hms "${list_used[$i]:-0}")"
+    printf '  %2d) %s%s%s  %s%s%s  %s(last used %s)%s\n' \
+      $((i+1)) "$BOLD$FG_CYAN" "$star" "$RESET" \
+      "$FG_BLUE" "${list_displays[$i]}" "$RESET" \
+      "$DIM" "$used_h" "$RESET"
+  done
+}
+
+perform_copy() {
+  local path="$1"
+  local c p1 tool
+  c=$(pass_decrypt "$path") || die "Failed to decrypt '$path'."
+  p1="$(parse_password "$c")"
+  if clipboard_copy "$p1"; then
+    tool="$CLIPBOARD_TOOL_LAST"
+  else
+    tool=""
+  fi
+  state_touch "$path"; state_save
+  if [[ -n "$tool" ]]; then msg_ok "Password copied to clipboard ($tool)."; else msg_warn "No clipboard tool found."; fi
+}
+
+perform_reveal() {
+  local path="$1" c p tool
+  c=$(pass_decrypt "$path") || die "Failed to decrypt '$path'."
+  p="$(parse_password "$c")"
+  if clipboard_copy "$p"; then
+    tool="$CLIPBOARD_TOOL_LAST"
+  else
+    tool=""
+  fi
+  state_touch "$path"; state_save
+  if [[ -n "$tool" ]]; then msg_note "Also copied to clipboard."; else msg_warn "No clipboard tool found; reveal only."; fi
+  reveal_until_clear "$(format_label "$path")" "$p"
+}
+
+clear_clipboard() {
+  local tool
+  if clipboard_copy ""; then
+    tool="$CLIPBOARD_TOOL_LAST"
+    msg_ok "Clipboard cleared ($tool)."
+  else
+    msg_warn "No clipboard tool found."
+  fi
+}
+
+options_menu() {
+  printf '%sOptions:%s\n' "$BOLD$FG_MAGENTA" "$RESET"
+  printf '  1) Unpin all\n'
+  printf '  2) Clear recents\n'
+  printf '  b) Back\n'
+  printf 'Select: '
+  local opt; read -r opt || return 0
+  case "$opt" in
+    1) state_unpin_all; state_save; msg_ok "All pins cleared." ;;
+    2) state_clear_recents; state_save; msg_ok "Recents cleared." ;;
+    b|'') : ;;
   esac
 }
 
-set_preview_mode() {
-  local mode="$1" data_line="$2"
-  local mf df
-  mf="${PREVIEW_MODE_FILE-}"
-  df="${PREVIEW_DATA_FILE-}"
-  [[ -n "$mf" ]] && { printf '%s' "$mode" >"$mf"; } || true
-  if [[ -n "$df" ]]; then
-    : >"$df"
-    [[ -n "${data_line:-}" ]] && printf '%s\n' "$data_line" >>"$df"
-  fi
+actions_menu_for() {
+  local idx="$1"
+  local path="${list_paths[$idx]}"
+  local display="${list_displays[$idx]}"
+  local pin="${list_pins[$idx]}"
+  local used_h="$(epoch_to_hms "${list_used[$idx]:-0}")"
+  printf '%sEntry:%s %s\n' "$BOLD$FG_MAGENTA" "$RESET" "$display"
+  printf '%sPath:%s  %s\n' "$DIM" "$RESET" "$path"
+  printf '%sPinned:%s %s   %sLast Used:%s %s\n' "$DIM" "$RESET" "$pin" "$DIM" "$RESET" "$used_h"
+  printf '\n%sActions:%s [c]opy  [r]eveal  [p]in/unpin  [x] clear-clipboard  [o]ptions  [b]ack  [q]uit\n' "$BOLD" "$RESET"
+  printf 'Select: '
+  local act; read -r act || return 0
+  case "$act" in
+    c|'') perform_copy "$path" ;;
+    r) perform_reveal "$path" ;;
+    p) state_toggle_pin "$path"; state_save; msg_ok "Pin toggled." ;;
+    x) clear_clipboard ;;
+    o) options_menu ;;
+    b) : ;;
+    q) exit 0 ;;
+  esac
 }
-
-# Action subcommands for fzf binds
-subcmd_copy() {
-  local path="$1" ts tool msg c p1
-  c=$(pass_decrypt "$path") || die "Failed to decrypt '$path'."
-  p1="$(parse_password "$c")"
-  ts="$(date +%H:%M:%S)"
-  tool=""
-  if command -v pbcopy >/dev/null 2>&1; then printf '%s' "$p1" | pbcopy; tool="pbcopy"; elif command -v wl-copy >/dev/null 2>&1; then printf '%s' "$p1" | wl-copy; tool="wl-copy"; elif command -v xclip >/dev/null 2>&1; then printf '%s' "$p1" | xclip -selection clipboard; tool="xclip"; elif command -v xsel >/dev/null 2>&1; then printf '%s' "$p1" | xsel --clipboard --input; tool="xsel"; fi
-  state_load; state_touch "$path"; state_save
-  if [[ -n "$tool" ]]; then msg="Copied via $tool at $ts"; else msg="No clipboard tool found"; fi
-  set_preview_mode "result:copy" "$msg"
-}
-
-subcmd_reveal() {
-  local path="$1" p2 c2 msg tool
-  c2=$(pass_decrypt "$path") || die "Failed to decrypt '$path'."
-  p2="$(parse_password "$c2")"
-  tool=""
-  if command -v pbcopy >/dev/null 2>&1; then printf '%s' "$p2" | pbcopy; tool="pbcopy"; elif command -v wl-copy >/dev/null 2>&1; then printf '%s' "$p2" | wl-copy; tool="wl-copy"; elif command -v xclip >/dev/null 2>&1; then printf '%s' "$p2" | xclip -selection clipboard; tool="xclip"; elif command -v xsel >/dev/null 2>&1; then printf '%s' "$p2" | xsel --clipboard --input; tool="xsel"; fi
-  state_load; state_touch "$path"; state_save
-  set_preview_mode "result:reveal" "$p2"
-  if [[ -n "$tool" ]]; then :; else :; fi
-}
-
-subcmd_pin_toggle() {
-  local path="$1"
-  state_load; state_toggle_pin "$path"; state_save
-  set_preview_mode "note" "Pin toggled."
-}
-
-subcmd_unpin_all() { state_load; state_unpin_all; state_save; set_preview_mode "note" "All pins cleared."; }
-subcmd_clear_recents() { state_load; state_clear_recents; state_save; set_preview_mode "note" "Recents cleared."; }
-subcmd_clear_clipboard() {
-  local tool
-  tool=""
-  if command -v pbcopy >/dev/null 2>&1; then printf '' | pbcopy; tool="pbcopy"; elif command -v wl-copy >/dev/null 2>&1; then printf '' | wl-copy; tool="wl-copy"; elif command -v xclip >/dev/null 2>&1; then printf '' | xclip -selection clipboard; tool="xclip"; elif command -v xsel >/dev/null 2>&1; then printf '' | xsel --clipboard --input; tool="xsel"; fi
-  if [[ -n "$tool" ]]; then set_preview_mode "note" "Clipboard cleared."; else set_preview_mode "note" "No clipboard tool found."; fi
-}
-subcmd_hide() { set_preview_mode "help" ""; }
-
-# Emit current fzf input lines: idx, slot, display, path, pin, used
-emit_fzf_input() {
-  local rows idx path display slot pin used
-  idx=0
-  while IFS=$'\t' read -r path display pin used; do
-    slot="$(index_to_choice_key "$idx")"
-    printf '%s\t%s%s%s\t%s\t%s\t%s\t%s\n' \
-      "$idx" "$BOLD$FG_CYAN" "$slot" "$RESET" \
-      "$display" "$path" "$pin" "$used"
-    idx=$((idx + 1))
-  done < <(build_sorted_listing)
-}
-
-require_deps() { command -v pass >/dev/null 2>&1 || die "Missing dependency: pass"; command -v fzf >/dev/null 2>&1 || die "Missing dependency: fzf"; }
 
 main_loop() {
-  local header prompt
+  local filter=""
   while true; do
-    header=$(printf '%sKeys:%s c=Copy  r=Reveal  p=Pin/Unpin  O=Unpin-all  R=Clear-recents  x=Clear-clipboard  b/h=Hide  Esc=Quit' "$BOLD$FG_CYAN" "$RESET")
-    prompt=$(printf '%s:: Search >%s ' "$BOLD$FG_MAGENTA" "$RESET")
-
-    # Ensure there are entries
-    local any; any=$(discover_entries | head -n1 || true)
-    [[ -n "$any" ]] || die "No pass entries found under '$PASSWORD_STORE_DIR'."
-
-    # Build initial input and slot binds
-    local listing tmp_input tmp_bind
-    listing=$(mktemp "${TMPDIR:-/tmp}/passage_list.XXXXXX"); build_sorted_listing > "$listing"
-    tmp_input=$(mktemp "${TMPDIR:-/tmp}/passage_input.XXXXXX")
-    tmp_bind=$(mktemp "${TMPDIR:-/tmp}/passage_bind.XXXXXX")
-
-    local idx=0 p d pin used slot
-    while IFS=$'\t' read -r p d pin used; do
-      slot="$(index_to_choice_key "$idx")"
-      printf '%s\t%s%s%s\t%s\t%s\t%s\t%s\n' "$idx" "$BOLD$FG_CYAN" "$slot" "$RESET" "$d" "$p" "$pin" "$used" >> "$tmp_input"
-      if [[ ${#slot} -eq 1 ]]; then printf '%s\t%s\n' "$idx" "$slot" >> "$tmp_bind"; fi
-      idx=$((idx + 1))
-    done < "$listing"
-
-    # Preview state files
-    export PREVIEW_MODE_FILE PREVIEW_DATA_FILE
-    PREVIEW_MODE_FILE=$(mktemp "${TMPDIR:-/tmp}/passage_mode.XXXXXX"); printf 'help' >"$PREVIEW_MODE_FILE"
-    PREVIEW_DATA_FILE=$(mktemp "${TMPDIR:-/tmp}/passage_data.XXXXXX"); : >"$PREVIEW_DATA_FILE"
-
-    # Build dynamic binds for slot keys
-    local bind_args=()
-    while IFS=$'\t' read -r rid rkey; do
-      local jump="" steps upper
-      steps=$rid; while (( steps > 0 )); do jump+="+down"; steps=$((steps - 1)); done
-      # ctrl-letter -> Copy
-      bind_args+=( "--bind" "ctrl-${rkey}:first${jump}+execute-silent(${0} __action_copy {4})+refresh-preview" )
-      # alt-letter -> Copy
-      bind_args+=( "--bind" "alt-${rkey}:first${jump}+execute-silent(${0} __action_copy {4})+refresh-preview" )
-      # alt-Upper -> Reveal
-      upper="$(printf '%s' "$rkey" | tr '[:lower:]' '[:upper:]')"
-      bind_args+=( "--bind" "alt-${upper}:first${jump}+execute-silent(${0} __action_reveal {4})+refresh-preview" )
-    done < "$tmp_bind"
-
-    # Global binds on current selection
-    bind_args+=( "--bind" "c:execute-silent(${0} __action_copy {4})+refresh-preview" )
-    bind_args+=( "--bind" "r:execute-silent(${0} __action_reveal {4})+refresh-preview" )
-    bind_args+=( "--bind" "p:execute-silent(${0} __action_pin_toggle {4})+reload(cat ${tmp_input})+refresh-preview" )
-    bind_args+=( "--bind" "O:execute-silent(${0} __action_unpin_all)+reload(cat ${tmp_input})+refresh-preview" )
-    bind_args+=( "--bind" "R:execute-silent(${0} __action_clear_recents)+reload(cat ${tmp_input})+refresh-preview" )
-    bind_args+=( "--bind" "x:execute-silent(${0} __action_clear_clipboard)+refresh-preview" )
-    bind_args+=( "--bind" "b:execute-silent(${0} __action_hide)+refresh-preview" )
-    bind_args+=( "--bind" "h:execute-silent(${0} __action_hide)+refresh-preview" )
-
-    # Run fzf; no --expect; rely on binds and Esc to quit
-    if ! fzf --ansi --with-nth=2,3 --delimiter=$'\t' \
-         --prompt "$prompt" --height=80% --layout=reverse --border --info=inline \
-         --header "$header" --no-sort --tiebreak=index \
-         --preview "${0} __preview {}" --preview-window=right,60%,border,wrap \
-         "${bind_args[@]}" < "$tmp_input" > /dev/null; then
-      printf '%sExiting.%s\n' "$DIM" "$RESET"
-      rm -f "$listing" "$tmp_input" "$tmp_bind" "$PREVIEW_MODE_FILE" "$PREVIEW_DATA_FILE"
-      break
+    load_listing_arrays "$filter"
+    if [[ ${#list_paths[@]} -eq 0 ]]; then
+      if [[ -n "$filter" ]]; then
+        msg_warn "No entries match filter '$filter'."
+        filter=""
+        continue
+      fi
+      die "No pass entries found under '$PASSWORD_STORE_DIR'."
     fi
-    rm -f "$listing" "$tmp_input" "$tmp_bind" "$PREVIEW_MODE_FILE" "$PREVIEW_DATA_FILE"
+
+    printf '%s:: Search:%s type "/term" to filter, number to select, rN=reveal, pN=pin, x=clear, o=options, q=quit\n' "$BOLD$FG_CYAN" "$RESET"
+    [[ -n "$filter" ]] && printf '%sFilter:%s %s\n' "$DIM" "$RESET" "$filter"
+    print_listing
+    printf '\nCommand: '
+    local cmd; read -r cmd || { printf '\n'; break; }
+
+    # Trim spaces
+    cmd="${cmd## }"; cmd="${cmd%% }"
+    if [[ -z "$cmd" ]]; then
+      continue
+    fi
+
+    case "$cmd" in
+      q|quit|exit) printf '%sExiting.%s\n' "$DIM" "$RESET"; break ;;
+      o) options_menu ;;
+      x) clear_clipboard ;;
+      /*) filter="${cmd#/}" ;;
+      r[0-9]*)
+        local n="${cmd#r}"
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
+          perform_reveal "${list_paths[$((n-1))]}"
+        else
+          msg_warn "Invalid index: $n"
+        fi ;;
+      p[0-9]*)
+        local n="${cmd#p}"
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
+          state_toggle_pin "${list_paths[$((n-1))]}"; state_save; msg_ok "Pin toggled."
+        else
+          msg_warn "Invalid index: $n"
+        fi ;;
+      [0-9]*)
+        local n="$cmd"
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
+          # Show actions menu for this selection; default Enter copies
+          actions_menu_for $((n-1))
+        else
+          msg_warn "Invalid index: $n"
+        fi ;;
+      *)
+        # Treat as new filter token(s)
+        filter="$cmd" ;;
+    esac
+    printf '\n'
   done
 }
 
 main() { require_deps; state_load; main_loop; }
-
-# Subcommand entry points for fzf preview/actions
-case "${1-}" in
-  __preview)
-    # Input is the full current line as one argument; ensure colors available
-    preview_render_line "${2-}"
-    exit 0 ;;
-  __action_copy)
-    PREVIEW_MODE_FILE="${PREVIEW_MODE_FILE-}" PREVIEW_DATA_FILE="${PREVIEW_DATA_FILE-}" subcmd_copy "${2-}"
-    exit 0 ;;
-  __action_reveal)
-    PREVIEW_MODE_FILE="${PREVIEW_MODE_FILE-}" PREVIEW_DATA_FILE="${PREVIEW_DATA_FILE-}" subcmd_reveal "${2-}"
-    exit 0 ;;
-  __action_pin_toggle)
-    PREVIEW_MODE_FILE="${PREVIEW_MODE_FILE-}" PREVIEW_DATA_FILE="${PREVIEW_DATA_FILE-}" subcmd_pin_toggle "${2-}"
-    exit 0 ;;
-  __action_unpin_all)
-    PREVIEW_MODE_FILE="${PREVIEW_MODE_FILE-}" PREVIEW_DATA_FILE="${PREVIEW_DATA_FILE-}" subcmd_unpin_all
-    exit 0 ;;
-  __action_clear_recents)
-    PREVIEW_MODE_FILE="${PREVIEW_MODE_FILE-}" PREVIEW_DATA_FILE="${PREVIEW_DATA_FILE-}" subcmd_clear_recents
-    exit 0 ;;
-  __action_clear_clipboard)
-    PREVIEW_MODE_FILE="${PREVIEW_MODE_FILE-}" PREVIEW_DATA_FILE="${PREVIEW_DATA_FILE-}" subcmd_clear_clipboard
-    exit 0 ;;
-  __action_hide)
-    PREVIEW_MODE_FILE="${PREVIEW_MODE_FILE-}" PREVIEW_DATA_FILE="${PREVIEW_DATA_FILE-}" subcmd_hide
-    exit 0 ;;
-esac
 
 main "$@"
