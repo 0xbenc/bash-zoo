@@ -51,17 +51,17 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 
 ## Tools at a Glance
 
-| Script | Superpower | Platforms | Extra Packages |
-| --- | --- | --- | --- |
-| `airplane` | Per-terminal offline mode: LAN allowed, WAN blocked | Debian/Ubuntu | installer applies firewall rules (root) |
-| `astra` | Terminal file manager with fuzzy search and previews | macOS, Debian/Ubuntu | `bash`, `fzf`, `jq`, `fd`/`fd-find`, `ripgrep`, `bat`, `chafa`, `poppler-utils`, `atool` |
-| `forgit` | Scan directories for Git repos needing commits or pushes | macOS, Debian/Ubuntu | `git` |
-| `mfa` | Generate TOTP codes from `pass` and copy them to your clipboard | macOS, Debian/Ubuntu | `pass`, `oathtool`, `fzf`, clipboard tool (`pbcopy`/`xclip`/`xsel`), optional `figlet` |
-| `passage` | Interactive GNU Pass browser with pins and MRU; copy or reveal password | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
-| `share` | Secure one-time file, folder, or clipboard transfer via magic‑wormhole | Debian/Ubuntu | `magic-wormhole`, `gnupg`, `tar`, clipboard tool (`xclip`/`xsel`) |
-| `uuid` | Create and copy a fresh UUID without leaving the terminal | macOS, Debian/Ubuntu | `uuidgen` (or Python 3), clipboard tool (`pbcopy`/`xclip`/`xsel`) |
-| `zapp` | Launch an AppImage or unpacked app stored under `~/zapps` | Debian/Ubuntu | none |
-| `zapper` | Prepare, validate, and register new apps for `zapp` with desktop entries | Debian/Ubuntu | `desktop-file-utils` |
+| Script | State | Superpower | Platforms | Extra Packages |
+| --- | --- | --- | --- | --- |
+| `airplane` | 🧪 experimental | Per-terminal offline mode: LAN allowed, WAN blocked | Debian/Ubuntu | installer applies firewall rules (root) |
+| `astra` | 🧪 experimental | Terminal file manager with fuzzy search and previews | macOS, Debian/Ubuntu | `bash`, `fzf`, `jq`, `fd`/`fd-find`, `ripgrep`, `bat`, `chafa`, `poppler-utils`, `atool` |
+| `forgit` | ✅ stable | Scan directories for Git repos needing commits or pushes | macOS, Debian/Ubuntu | `git` |
+| `mfa` | ✅ stable | Generate TOTP codes from `pass` and copy them to your clipboard | macOS, Debian/Ubuntu | `pass`, `oathtool`, `fzf`, clipboard tool (`pbcopy`/`xclip`/`xsel`), optional `figlet` |
+| `passage` | 🧪 experimental | Interactive GNU Pass browser with pins and MRU; copy or reveal password | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
+| `share` | 🧪 experimental | Secure one-time file, folder, or clipboard transfer via magic‑wormhole | Debian/Ubuntu | `magic-wormhole`, `gnupg`, `tar`, clipboard tool (`xclip`/`xsel`) |
+| `uuid` | ✅ stable | Create and copy a fresh UUID without leaving the terminal | macOS, Debian/Ubuntu | `uuidgen` (or Python 3), clipboard tool (`pbcopy`/`xclip`/`xsel`) |
+| `zapp` | ✅ stable | Launch an AppImage or unpacked app stored under `~/zapps` | Debian/Ubuntu | none |
+| `zapper` | ✅ stable | Prepare, validate, and register new apps for `zapp` with desktop entries | Debian/Ubuntu | `desktop-file-utils` |
 
 ## Tool Details
 
