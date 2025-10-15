@@ -325,7 +325,7 @@ main_loop() {
       die "No pass entries found under '$PASSWORD_STORE_DIR'."
     fi
 
-    printf '%s:: Search:%s type "/term" to filter, number to select, rN=reveal, pN=pin, x=clear, o=options, q=quit\n' "$BOLD$FG_CYAN" "$RESET"
+    printf '%s:: Search:%s type "/term" to filter, number to select, r"n"=reveal, p"n"=pin, x=clear, o=options, q=quit\n' "$BOLD$FG_CYAN" "$RESET"
     [[ -n "$filter" ]] && printf '%sFilter:%s %s\n' "$DIM" "$RESET" "$filter"
     print_listing
     printf '\nCommand: '

@@ -48,7 +48,8 @@ fi
 
 # One-time ASCII animation ("0xbenc") before interactive selection
 # - Skips if not a TTY or disabled via BZ_NO_ASCII=1
-# - Uses text frame files under ascii/0xbenc if present
+# - Uses text frame files under ascii/0xbenc_large or ascii/0xbenc_small
+#   (>=96 cols uses large; <=95 uses small). BZ_ASCII_DIR overrides.
 play_ascii_once() {
   if [[ -n "${BZ_NO_ASCII:-}" ]]; then
     return 0
@@ -89,7 +90,34 @@ play_ascii_once() {
     ''|*[!0-9]*) hold_secs=1 ;;
   esac
 
-  local frames_dir="${BZ_ASCII_DIR:-$PWD/ascii/0xbenc}"
+  # Choose frames directory based on terminal width unless overridden
+  local frames_dir
+  if [[ -n "${BZ_ASCII_DIR:-}" ]]; then
+    frames_dir="${BZ_ASCII_DIR}"
+  else
+    # Determine column width
+    local cols=""
+    if [[ $have_tput -eq 1 ]]; then
+      cols=$(tput cols 2>/dev/null || true)
+    fi
+    if [[ -z "${cols:-}" ]]; then
+      # stty prints: rows cols
+      if command -v stty >/dev/null 2>&1 && [[ -t 1 ]]; then
+        cols=$(stty size 2>/dev/null | awk '{print $2}')
+      fi
+    fi
+    if [[ -z "${cols:-}" ]]; then
+      cols="${COLUMNS:-}"
+    fi
+    case "${cols:-}" in
+      ''|*[!0-9]*) cols=80 ;;
+    esac
+    if (( cols >= 96 )); then
+      frames_dir="$PWD/ascii/0xbenc_large"
+    else
+      frames_dir="$PWD/ascii/0xbenc_small"
+    fi
+  fi
   local use_files=0
   if compgen -G "$frames_dir/frame_*.txt" >/dev/null 2>&1; then
     use_files=1
