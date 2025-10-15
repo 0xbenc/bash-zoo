@@ -227,15 +227,13 @@ load_listing_arrays() {
 
 print_listing() {
   local total=${#list_paths[@]}
-  local i used_h star
+  local i star
   printf '%sEntries:%s %s%d%s\n' "$BOLD$FG_CYAN" "$RESET" "$FG_GREEN" "$total" "$RESET"
   for ((i=0; i<total; i++)); do
     star=""; [[ "${list_pins[$i]}" == "1" ]] && star="${FG_YELLOW}★ ${RESET}"
-    used_h="$(epoch_to_hms "${list_used[$i]:-0}")"
-    printf '  %2d) %s%s%s  %s%s%s  %s(last used %s)%s\n' \
+    printf '  %2d) %s%s%s  %s%s%s\n' \
       $((i+1)) "$BOLD$FG_CYAN" "$star" "$RESET" \
-      "$FG_BLUE" "${list_displays[$i]}" "$RESET" \
-      "$DIM" "$used_h" "$RESET"
+      "$FG_BLUE" "${list_displays[$i]}" "$RESET"
   done
 }
 
