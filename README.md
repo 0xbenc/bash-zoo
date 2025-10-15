@@ -169,7 +169,9 @@ cd bash-zoo
 - Shows which tools need additional packages before enabling
 - Groups complementary tools (like the `zapps` pair) for easy onboarding
 - Stores aliases so the commands travel with every new shell session
-- Skip prompts with `./install.sh --all` to install every tool supported on your platform
+- By default shows only stable tools (`uuid`, `mfa`, `forgit`, and `zapp`/`zapper`).
+- Include experimental tools by adding `--exp` (e.g., `./install.sh --exp`).
+- Skip prompts with `./install.sh --all` (respects `--exp` filtering).
 
 ### Option B — Manual pick-and-run
 

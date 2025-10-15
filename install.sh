@@ -3,15 +3,19 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 [--all]" >&2
+  echo "Usage: $0 [--all] [--exp]" >&2
 }
 
 select_all=0
+include_exp=0
 if [[ $# -gt 0 ]]; then
   for arg in "$@"; do
     case "$arg" in
       --all|-a|all)
         select_all=1
+        ;;
+      --exp)
+        include_exp=1
         ;;
       --help|-h)
         usage
@@ -305,6 +309,32 @@ while IFS=$'\t' read -r name oses has_deps desc; do
         scripts_desc+=("${desc:-}")
     fi
 done < "$REGISTRY_FILE"
+
+# When not including experimental tools, filter to the stable set
+if [[ $include_exp -eq 0 ]]; then
+    stable_names=("uuid" "mfa" "forgit" "zapp" "zapper")
+    filtered_scripts=()
+    filtered_has_deps=()
+    filtered_desc=()
+    for i in "${!scripts[@]}"; do
+        sname="${scripts[i]}"
+        keep=0
+        for st in "${stable_names[@]}"; do
+            if [[ "$sname" == "$st" ]]; then
+                keep=1
+                break
+            fi
+        done
+        if [[ $keep -eq 1 ]]; then
+            filtered_scripts+=("$sname")
+            filtered_has_deps+=("${scripts_has_deps[i]}")
+            filtered_desc+=("${scripts_desc[i]}")
+        fi
+    done
+    scripts=("${filtered_scripts[@]}")
+    scripts_has_deps=("${filtered_has_deps[@]}")
+    scripts_desc=("${filtered_desc[@]}")
+fi
 
 # Group zapp + zapper into a single selectable pair "zapps"
 zapp_idx=-1
