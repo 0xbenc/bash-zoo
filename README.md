@@ -56,10 +56,10 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 | `airplane` | Per-terminal offline mode: LAN allowed, WAN blocked | Debian/Ubuntu | installer applies firewall rules (root) |
 | `astra` | Terminal file manager with fuzzy search and previews | macOS, Debian/Ubuntu | `bash`, `fzf`, `jq`, `fd`/`fd-find`, `ripgrep`, `bat`, `chafa`, `poppler-utils`, `atool` |
 | `forgit` | Scan directories for Git repos needing commits or pushes | macOS, Debian/Ubuntu | `git` |
-| `mfa` | Generate TOTP codes from `pass` and copy them to your clipboard | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
+| `mfa` | Generate TOTP codes from `pass` and copy them to your clipboard | macOS, Debian/Ubuntu | `pass`, `oathtool`, `fzf`, clipboard tool (`pbcopy`/`xclip`/`xsel`), optional `figlet` |
 | `passage` | Interactive GNU Pass browser with pins and MRU; copy or reveal password | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
-| `share` | Secure one-time file, folder, or clipboard transfer through a relay | Debian/Ubuntu | `curl`, `openssl`, `socat` |
-| `uuid` | Create and copy a fresh UUID without leaving the terminal | Debian/Ubuntu | `xclip` |
+| `share` | Secure one-time file, folder, or clipboard transfer via magic‑wormhole | Debian/Ubuntu | `magic-wormhole`, `gnupg`, `tar`, clipboard tool (`xclip`/`xsel`) |
+| `uuid` | Create and copy a fresh UUID without leaving the terminal | macOS, Debian/Ubuntu | `uuidgen` (or Python 3), clipboard tool (`pbcopy`/`xclip`/`xsel`) |
 | `zapp` | Launch an AppImage or unpacked app stored under `~/zapps` | Debian/Ubuntu | none |
 | `zapper` | Prepare, validate, and register new apps for `zapp` with desktop entries | Debian/Ubuntu | `desktop-file-utils` |
 
@@ -96,7 +96,7 @@ Notes
 
 ### mfa
 
-`mfa` pulls TOTP codes from your [`pass`](https://www.passwordstore.org/) store, copies them to the clipboard, and shows a countdown until the next code rotation. To make it work you need:
+`mfa` pulls TOTP codes from your [`pass`](https://www.passwordstore.org/) store, copies them to the clipboard, and shows a countdown until the next code rotation. It features fuzzy search (via `fzf`), optional big‑font display (`figlet`), and smart key‑bindings for quick selection. To make it work you need:
 
 1. **Dependencies** — Install `pass`, `oathtool`, and your platform clipboard helper (`pbcopy` on macOS, `xclip`/`xsel` on Debian).
 2. **Initialize pass** — Generate (or reuse) a GPG key, then run `pass init <gpg-id>`. This creates `~/.password-store` as your encrypted vault.
@@ -137,19 +137,70 @@ Notes
 
 ### share
 
-`share` turns a local file, directory, or even clipboard contents into a one-time payload that can be pulled down with a shell command on another machine. It wraps `curl`, `openssl`, and `socat` to encrypt the payload, create a temporary relay, and print the matching `share receive` command for your recipient. When the download completes, the relay tears itself down so nothing lingers on disk or over the wire.
+`share` turns a local file, directory, text string, or clipboard contents into a one‑time, PIN‑protected payload using symmetric GPG encryption and transfers it over magic‑wormhole. The receiver enters the human‑memorable wormhole code and the same PIN to decrypt; the original filename is preserved.
+
+Examples:
+
+```bash
+# Send a file or directory (you’ll be prompted for a 4‑digit PIN)
+share ./file.png
+share ./some-folder/
+
+# Send clipboard contents or ad‑hoc text
+share --clipboard
+share --text "Hello from Bash Zoo!"
+
+# Receive on another machine
+share --receive 23-barn-animal   # prompts for the PIN to decrypt
+```
+
+Notes:
+- Directories are auto‑tarred before encryption; after receive you’re offered extraction.
+- Clipboard mode uses `xclip`/`xsel` on Linux. macOS isn’t supported by this script yet (GNU `mktemp` flags used); Debian/Ubuntu is supported and packaged by the installer.
 
 ### uuid
 
-`uuid` gives you a fresh RFC 4122 identifier and handles clipboard copy so you can paste immediately into logs or dashboards. It ships with a subcommand layout (`uuid print`, `uuid copy`, etc.) but the bare command defaults to copying, which keeps your keystrokes minimal when filling out forms or provisioning new infra.
+`uuid` prints a fresh RFC 4122 v4 identifier and copies it to your clipboard so you can paste immediately into logs or dashboards. It prefers `uuidgen` when available, falls back to `/proc/sys/kernel/random/uuid` on Linux, and finally to Python 3’s `uuid` module.
+
+Examples:
+
+```bash
+uuid               # prints and copies a v4 UUID
+uuid | tee /dev/tty | pbcopy   # macOS: alternative copy path
+```
+
+Platform note:
+- The script works on macOS and Linux. The guided installer currently provisions it on Debian/Ubuntu; on macOS you can still use it by running it directly from `scripts/uuid.sh` or adding your own alias.
 
 ### zapp
 
-`zapp` launches AppImages or unpacked Linux apps you have staged under `~/zapps`. It normalizes the environment so you do not need to remember `chmod +x` or where a particular binary lives. Drop an AppImage or directory into `~/zapps/<name>` and run `zapp <name>` to execute it with sensible defaults.
+`zapp` launches AppImages or unpacked Linux apps staged under `~/zapps`. It lists available apps, accepts a single‑letter selection, and runs the best match inside the chosen folder:
+
+1) `zapp.AppImage` if present and executable
+2) The executable path named in `zapp.md`
+3) Otherwise, it prompts you to pick from detected executables in the folder (or its single subfolder)
+
+Example:
+
+```bash
+zapp   # interactive launcher; pick by letter
+```
 
 ### zapper
 
-`zapper` prepares new entries for `zapp` by validating the payload, creating desktop files, and wiring up icons so the app shows up in launchers. It is the on-ramp for new AppImages: point it at a download, answer the prompts, then use `zapp` for day-to-day launching. Re-running `zapper` lets you update icons or fix metadata without touching the existing installation.
+`zapper` prepares new entries for `zapp` by validating the payload, creating a `zapp.md` pointing to the chosen executable, and writing a `.desktop` file so the app shows up in your launcher with an icon.
+
+Examples:
+
+```bash
+zapper ~/Downloads/Foo.AppImage
+zapper ~/Downloads/bar-1.2.3-linux-x64.tar.gz
+```
+
+What it does:
+- Moves or extracts the payload into `~/zapps/<name>`
+- Detects (or lets you choose) the main executable; records it in `zapp.md`
+- Scans for icons near the executable and writes `~/.local/share/applications/zapp-<name>.desktop`
 
 ## Installation
 
@@ -189,9 +240,13 @@ cd bash-zoo
 | `mfa` | ✅ | ✅ |
 | `passage` | ✅ | ✅ |
 | `share` | ⛔️ | ✅ |
-| `uuid` | ⛔️ | ✅ |
+| `uuid` | ✅ | ✅ |
 | `zapp` + `zapper` | ⛔️ | ✅ |
 | `install.sh` | ✅ *(Homebrew required for dependencies)* | ✅ *(APT and friends)* |
+
+Notes:
+- The guided installer offers `uuid` on Debian/Ubuntu today; on macOS the script works out‑of‑the‑box if `uuidgen` and `pbcopy` exist, but we haven’t added a Homebrew installer yet.
+- `share` currently targets Debian/Ubuntu because it uses GNU `mktemp` flags; macOS support would require minor script tweaks and a Homebrew formula set.
 
 > The installer gracefully exits on unsupported platforms without touching your system.
 
@@ -201,9 +256,12 @@ After installation, reload your shell (`exec "$SHELL" -l`) or open a fresh termi
 
 ```bash
 mfa work/email        # Copy a TOTP token from pass
-share send ./build    # Turn a folder into a one-time drop
+share ./build         # Turn a folder into a one-time drop
 forgit                # Audit every git repo under the current directory
 astra                 # Launch the fuzzy-driven file manager in the current directory
+uuid                  # Generate + copy a v4 UUID
+zapper ~/Downloads/Foo.AppImage   # Prepare a new app for zapp
+zapp                  # List and launch apps in ~/zapps
 ```
 
 Need a refresher inside the CLI? Run `<tool> --help` or read the source — each script is tiny and documented inline.
@@ -229,8 +287,10 @@ Then restart your shell so aliases disappear: `exec "$SHELL" -l`.
 
 ## Credits
 
+- [Vik Bhaduri](https://github.com/basedvik) — Contributor
 - [Ben Chapman](https://github.com/0xbenc) — Maintainer
 - [Ben Cully](https://github.com/BenCully) — Contributor
+
 
 ## License
 

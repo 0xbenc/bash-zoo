@@ -85,9 +85,9 @@ play_ascii_once() {
   fi
 
   # Hold duration on last frame (seconds); default 1
-  local hold_secs="${BZ_ASCII_HOLD:-1}"
+  local hold_secs="${BZ_ASCII_HOLD:-3}"
   case "$hold_secs" in
-    ''|*[!0-9]*) hold_secs=1 ;;
+    ''|*[!0-9]*) hold_secs=3 ;;
   esac
 
   # Choose frames directory based on terminal width unless overridden
@@ -340,7 +340,7 @@ done < "$REGISTRY_FILE"
 
 # When not including experimental tools, filter to the stable set
 if [[ $include_exp -eq 0 ]]; then
-    stable_names=("uuid" "mfa" "forgit" "zapp" "zapper")
+    stable_names=("uuid" "mfa" "forgit" "passage" "zapp" "zapper")
     filtered_scripts=()
     filtered_has_deps=()
     filtered_desc=()
