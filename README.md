@@ -20,7 +20,7 @@
  =======  ===  === ======  ===  ===      ========  ======   ======
 ```                                                             
 
-> For power users and n00bs, anybody not afraid of the terminal emulator
+> Let's start shipping
 
 ## TL;DR
 
