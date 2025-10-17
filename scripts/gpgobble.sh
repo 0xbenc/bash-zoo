@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# gpgobble — bulk import public keys + set ownertrust to FULL (4) for non-local keys
+# gpgobble — bulk import public keys + local-sign + set ownertrust FULL (4) for non-local keys
 #
 # Behavior (no flags):
 #  • Import all public keys from DIR (default ".")
-#  • If this machine has the secret key for a fingerprint, DO NOT touch its trust
-#  • For others, set ownertrust to FULL (4) iff not already full (4) or ultimate (5)
+#  • If this machine has the secret key for a fingerprint, DO NOT touch its trust/signature
+#  • For others, local-sign (lsign) and set ownertrust to FULL (4) iff not already 4 or 5
 #  • If trust is already ULTIMATE (5), leave it as-is (do not downgrade)
 #
 # Usage:
@@ -30,8 +30,7 @@ if [[ ! -d "$DIR" ]]; then
   exit 2
 fi
 
-# Collect candidate files (shallow, no recursion) in a portable way.
-# We'll try everything; non-key files will be skipped after import-show.
+# Collect candidate files (shallow, no recursion).
 prev_nullglob=$(shopt -p nullglob 2>/dev/null || true)
 prev_dotglob=$(shopt -p dotglob 2>/dev/null || true)
 shopt -s nullglob dotglob
@@ -81,18 +80,25 @@ for f in "${FILES[@]}"; do
     continue
   fi
 
-  # 3) Trust management for each primary fp
+  # 3) Local-sign + trust management for each primary fp
   for fp in "${fps[@]}"; do
     [[ -n "$fp" ]] || continue
 
     # (A) Skip if a secret key exists locally
     if gpg --batch --quiet --list-secret-keys "$fp" >/dev/null 2>&1; then
-      printf '    skip trust (secret key present): %s\n' "$fp"
+      printf '    skip (own secret key present): %s\n' "$fp"
       processed_any=true
       continue
     fi
 
-    # (B) Decide based on current ownertrust
+    # (B) Local-sign (idempotent). Avoid --batch so pinentry can prompt if needed.
+    if gpg --quiet --yes --quick-lsign-key "$fp" >/dev/null 2>&1; then
+      printf '    localsign OK: %s\n' "$fp"
+    else
+      printf '    localsign FAILED (continuing to set ownertrust): %s\n' "$fp" >&2
+    fi
+
+    # (C) Decide based on current ownertrust
     lvl="$(trust_level "$fp")"
     if [[ "$lvl" == "5" ]]; then
       printf '    skip trust (already ultimate): %s\n' "$fp"
@@ -119,7 +125,8 @@ if [[ ${#TO_FULL[@]} -gt 0 ]]; then
 fi
 
 if $processed_any; then
-  printf 'Done. Imported keys and set ownertrust=FULL (4) where needed.\n'
+  printf 'Done. Imported keys, local-signed non-local keys, and set ownertrust=FULL (4) where needed.\n'
 else
   printf 'No keys were imported.\n'
 fi
+
