@@ -10,3 +10,4 @@ forgit	debian,macos	yes	Find git repos with uncommitted or unpushed work under a
 astra	debian,macos	yes	File browser
 airplane	debian	yes	Virtaul "Airplane Mode" disables WWW but not WLAN
 passage	debian,macos	yes	Interactive pass browser with pins + MRU and clipboard helpers
+gpgobble	debian,macos	yes	Bulk import public keys and set ownertrust FULL (4) for non-local keys

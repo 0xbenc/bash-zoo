@@ -36,6 +36,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
   - [airplane](#airplane)
   - [astra](#astra)
   - [forgit](#forgit)
+  - [gpgobble](#gpgobble)
   - [mfa](#mfa)
   - [passage](#passage)
   - [share](#share)
@@ -64,6 +65,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 | `airplane` | 🧪 experimental | Per-terminal offline mode: LAN allowed, WAN blocked | Debian/Ubuntu | installer applies firewall rules (root) |
 | `astra` | 🧪 experimental | Terminal file manager with fuzzy search and previews | macOS, Debian/Ubuntu | `bash`, `fzf`, `jq`, `fd`/`fd-find`, `ripgrep`, `bat`, `chafa`, `poppler-utils`, `atool` |
 | `forgit` | ✅ stable | Scan directories for Git repos needing commits or pushes | macOS, Debian/Ubuntu | `git` |
+| `gpgobble` | ✅ stable | Bulk‑import public keys and set ownertrust to FULL (4) for non‑local keys | macOS, Debian/Ubuntu | `gnupg` |
 | `mfa` | ✅ stable | Generate TOTP codes from `pass` and copy them to your clipboard | macOS, Debian/Ubuntu | `pass`, `oathtool`, `fzf`, clipboard tool (`pbcopy`/`xclip`/`xsel`), optional `figlet` |
 | `passage` | 🧪 experimental | Interactive GNU Pass browser with pins and MRU; copy or reveal password | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
 | `share` | 🧪 experimental | Secure one-time file, folder, or clipboard transfer via magic‑wormhole | Debian/Ubuntu | `magic-wormhole`, `gnupg`, `tar`, clipboard tool (`xclip`/`xsel`) |
@@ -101,6 +103,22 @@ Notes
 ### forgit
 
 `forgit` sweeps the directories beneath your current working tree and flags every Git repository with uncommitted changes or pending pushes. It also shows the current branch for each flagged repository so you can jump directly to the right place. Use it as a morning ritual to catch forgotten work: run `forgit` from `~/code` (or similar) and drill into repositories that show up with red or yellow markers. The script respects Git status output, so clean repos never clutter the list.
+
+### gpgobble
+
+`gpgobble` bulk‑imports public keys from a directory and upgrades ownertrust to FULL (4) for keys that do not have a local secret key. It never downgrades trust and leaves ULTIMATE (5) alone.
+
+Usage
+
+```bash
+gpgobble               # import all files in the current directory
+gpgobble ./keys/work   # import from a specific folder
+GNUPGHOME=/tmp/gnupg gpgobble ./keys
+```
+
+Notes
+- Requires `gpg` (`gnupg`).
+- Works with the default macOS Bash 3.2; no GNU `find` required.
 
 ### mfa
 
@@ -224,7 +242,7 @@ cd bash-zoo
 - Shows which tools need additional packages before enabling
 - Groups complementary tools (like the `zapps` pair) for easy onboarding
 - Stores aliases so the commands travel with every new shell session
-- By default shows only stable tools (`uuid`, `mfa`, `forgit`, and `zapp`/`zapper`).
+- By default shows only stable tools (`uuid`, `mfa`, `forgit`, `gpgobble`, and `zapp`/`zapper`).
 - Include experimental tools by adding `--exp` (e.g., `./install.sh --exp`).
 - Skip prompts with `./install.sh --all` (respects `--exp` filtering).
 
@@ -245,6 +263,7 @@ cd bash-zoo
 | `airplane` | ⛔️ | ✅ |
 | `astra` | ✅ *(Homebrew bash + deps required)* | ✅ |
 | `forgit` | ✅ | ✅ |
+| `gpgobble` | ✅ | ✅ |
 | `mfa` | ✅ | ✅ |
 | `passage` | ✅ | ✅ |
 | `share` | ⛔️ | ✅ |
