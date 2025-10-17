@@ -325,7 +325,7 @@ main_loop() {
       die "No pass entries found under '$PASSWORD_STORE_DIR'."
     fi
 
-    printf '%s:: Search:%s type "/term" to filter, number to select, r"n"=reveal, p"n"=pin, x=clear, o=options, q=quit\n' "$BOLD$FG_CYAN" "$RESET"
+    printf '%s::%s /term filter | n select | cN/Nc copy | rN/Nr reveal | pN/Np pin | x clear | o options | q quit\n' "$BOLD$FG_CYAN" "$RESET"
     [[ -n "$filter" ]] && printf '%sFilter:%s %s\n' "$DIM" "$RESET" "$filter"
     print_listing
     printf '\nCommand: '
@@ -349,8 +349,36 @@ main_loop() {
         else
           msg_warn "Invalid index: $n"
         fi ;;
+      [0-9]*r)
+        local n="${cmd%r}"
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
+          perform_reveal "${list_paths[$((n-1))]}"
+        else
+          msg_warn "Invalid index: $n"
+        fi ;;
+      c[0-9]*)
+        local n="${cmd#c}"
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
+          perform_copy "${list_paths[$((n-1))]}"
+        else
+          msg_warn "Invalid index: $n"
+        fi ;;
+      [0-9]*c)
+        local n="${cmd%c}"
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
+          perform_copy "${list_paths[$((n-1))]}"
+        else
+          msg_warn "Invalid index: $n"
+        fi ;;
       p[0-9]*)
         local n="${cmd#p}"
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
+          state_toggle_pin "${list_paths[$((n-1))]}"; state_save; msg_ok "Pin toggled."
+        else
+          msg_warn "Invalid index: $n"
+        fi ;;
+      [0-9]*p)
+        local n="${cmd%p}"
         if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
           state_toggle_pin "${list_paths[$((n-1))]}"; state_save; msg_ok "Pin toggled."
         else

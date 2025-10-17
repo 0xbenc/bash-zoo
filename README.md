@@ -138,7 +138,7 @@ Notes
 - Safe defaults: no secrets printed unless you choose Reveal.
 - Commands:
   - Type a number to select an entry; then choose an action (Enter copies by default).
-  - `rN` reveal entry `N` (also copies). `pN` pin/unpin entry `N`.
+  - `cN` or `Nc` copy entry `N`. `rN` or `Nr` reveal entry `N` (also copies). `pN` or `Np` pin/unpin entry `N`.
   - `/term` filter list by substring; empty filter shows all again.
   - `O` via Options menu clears pins; `R` via Options menu clears recents.
   - `x` clears clipboard; `o` opens options; `q` quits.
