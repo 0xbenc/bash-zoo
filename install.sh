@@ -503,65 +503,18 @@ else
     payload+='] }'
 
     # Run the selector; collect selected names (one per line)
-    if ensure_enquirer; then
-        selected_names=()
-        # Pass payload in env var to keep stdin/tty free for interactivity
-        while IFS= read -r __sel_line; do
-            [[ -z "${__sel_line:-}" ]] && continue
-            selected_names+=("$__sel_line")
-        done < <(BZ_PAYLOAD="$payload" NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" node "bin/select.js")
-    else
-        # Fallback to the original minimal interactivity when Node or enquirer are unavailable
-        selected=()
-        for _ in "${scripts[@]}"; do selected+=(0); done
-        current=0
-        draw_menu() {
-            clear
-            echo "Use 'J' and 'K' to move, 'H' to toggle, 'L' to confirm."
-            for i in "${!scripts[@]}"; do
-                if [[ $i -eq $current ]]; then
-                    echo -ne "\e[1;32m> "
-                else
-                    echo -ne "  "
-                fi
-
-                if [[ ${selected[i]} -eq 1 ]]; then
-                    echo -ne "[✔ ] "
-                else
-                    echo -ne "[ ] "
-                fi
-
-                label="${scripts[i]}"
-                if [[ "${scripts[i]}" == "zapps" ]]; then
-                    label="zapps (zapp + zapper)"
-                fi
-                echo -e "$label\e[0m"
-            done
-            echo
-            # Show contextual description for the currently focused item
-            cur_desc="${scripts_desc[current]:-}"
-            if [[ -n "$cur_desc" ]]; then
-              echo -e "\e[2m$cur_desc\e[0m"
-            fi
-        }
-        while true; do
-            draw_menu
-            read -rsn1 input
-            case "$input" in
-                "k") ((current = (current - 1 + ${#scripts[@]}) % ${#scripts[@]})) ;;
-                "j") ((current = (current + 1) % ${#scripts[@]})) ;;
-                "h") selected[current]=$((1 - selected[current])) ;;
-                "l") break ;;
-            esac
-        done
-        # Convert fallback selections into the same selected_names format
-        selected_names=()
-        for i in "${!scripts[@]}"; do
-            if [[ ${selected[i]} -eq 1 ]]; then
-                selected_names+=("${scripts[i]}")
-            fi
-        done
+    if ! ensure_enquirer; then
+        echo "Error: enquirer is required for interactive selection." >&2
+        echo "- Ensure Node.js and a package manager (npm/pnpm/yarn/bun) are available." >&2
+        echo "- Or run with --all to install every available tool non-interactively." >&2
+        exit 1
     fi
+    selected_names=()
+    # Pass payload in env var to keep stdin/tty free for interactivity
+    while IFS= read -r __sel_line; do
+        [[ -z "${__sel_line:-}" ]] && continue
+        selected_names+=("$__sel_line")
+    done < <(BZ_PAYLOAD="$payload" NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" node "bin/select.js")
 
     clear
 fi
