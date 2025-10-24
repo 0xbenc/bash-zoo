@@ -247,6 +247,7 @@ cd bash-zoo
 - By default shows only stable tools (`uuid`, `mfa`, `forgit`, `gpgobble`, and `zapp`/`zapper`).
 - Include experimental tools by adding `--exp` (e.g., `./install.sh --exp`).
 - Skip prompts with `./install.sh --all` (respects `--exp` filtering).
+- Interactive picker also includes an "All" option to select everything.
 
 ### Option B — Manual pick-and-run
 
@@ -311,6 +312,8 @@ The installer is idempotent: re-running only tweaks what changed and offers new 
 ./uninstall.sh
 ./uninstall.sh --all  # remove every Bash Zoo alias and binary in one go
 ```
+
+The interactive uninstaller also includes an "All" option for quick removal.
 
 Then restart your shell so aliases disappear: `exec "$SHELL" -l`.
 

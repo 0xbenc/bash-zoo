@@ -268,6 +268,7 @@ if [[ $select_all -eq 1 ]]; then
 else
   # Build selection payload
   payload='{ "title": "Select items to remove", "choices": ['
+  payload+='{"name":"all","message":"All (aliases + binaries)","summary":"Remove every listed item"},'
   for j in "${!item_ids[@]}"; do
     id="${item_ids[$j]}"
     label="${item_labels[$j]}"
@@ -285,15 +286,23 @@ else
       selected_ids+=("$__sel")
     done < <(BZ_PAYLOAD="$payload" NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" node "bin/select.js")
   else
-    # Fallback minimal TUI (hjkl)
+    # Fallback minimal TUI with an explicit "All" row (hjkl)
     current=0
     selected=()
     for _ in "${item_ids[@]}"; do selected+=(0); done
+    all_selected=0
+    total_items=${#item_ids[@]}
     draw_menu() {
       clear
-      echo "Use 'J' and 'K' to move, 'H' to toggle, 'L' to confirm."
+      echo "Use 'J'/'K' to move, 'H' to toggle, 'L' to confirm."
+      # Render the synthetic All row at top
+      if [[ $current -eq 0 ]]; then echo -ne "\e[1;32m> "; else echo -ne "  "; fi
+      if [[ $all_selected -eq 1 ]]; then echo -ne "[✔ ] "; else echo -ne "[ ] "; fi
+      echo -e "All (aliases + binaries)\e[0m"
+      # Render real items
       for j in "${!item_ids[@]}"; do
-        if [[ $j -eq $current ]]; then echo -ne "\e[1;32m> "; else echo -ne "  "; fi
+        idx=$((j+1))
+        if [[ $idx -eq $current ]]; then echo -ne "\e[1;32m> "; else echo -ne "  "; fi
         if [[ ${selected[j]} -eq 1 ]]; then echo -ne "[✔ ] "; else echo -ne "[ ] "; fi
         echo -e "${item_labels[$j]}\e[0m"
       done
@@ -302,9 +311,30 @@ else
       draw_menu
       read -rsn1 key
       case "$key" in
-        "k") ((current = (current - 1 + ${#item_ids[@]}) % ${#item_ids[@]})) ;;
-        "j") ((current = (current + 1) % ${#item_ids[@]})) ;;
-        "h") selected[current]=$((1 - selected[current])) ;;
+        "k") # up
+          ((current = (current - 1 + (total_items + 1)) % (total_items + 1))) ;;
+        "j") # down
+          ((current = (current + 1) % (total_items + 1))) ;;
+        "h") # toggle selection
+          if [[ $current -eq 0 ]]; then
+            # Toggle all
+            if [[ $all_selected -eq 1 ]]; then
+              all_selected=0
+              for i in "${!selected[@]}"; do selected[$i]=0; done
+            else
+              all_selected=1
+              for i in "${!selected[@]}"; do selected[$i]=1; done
+            fi
+          else
+            idx=$((current-1))
+            selected[$idx]=$((1 - selected[$idx]))
+            # Keep all_selected in sync
+            all_selected=1
+            for i in "${!selected[@]}"; do
+              if [[ ${selected[$i]} -eq 0 ]]; then all_selected=0; break; fi
+            done
+          fi
+          ;;
         "l") break ;;
       esac
     done
@@ -313,6 +343,14 @@ else
     done
   fi
 fi
+
+# If special "all" was selected via the enquirer UI, expand to full set
+for __sel in "${selected_ids[@]:-}"; do
+  if [[ "$__sel" == "all" ]]; then
+    selected_ids=("${item_ids[@]}")
+    break
+  fi
+done
 
 if [[ ${#selected_ids[@]} -eq 0 ]]; then
   echo "No items selected. Exiting."

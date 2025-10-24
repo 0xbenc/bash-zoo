@@ -483,6 +483,8 @@ if [[ $select_all -eq 1 ]]; then
     selected_names=("${scripts[@]}")
 else
     payload='{ "title": "Select tools to install", "choices": ['
+    # Add an explicit "all" option at the top for quick select-all
+    payload+='{"name":"all","message":"All (everything below)","summary":"Install every available tool"},'
     for i in "${!scripts[@]}"; do
         label="${scripts[i]}"
         if [[ "${scripts[i]}" == "zapps" ]]; then
@@ -521,6 +523,14 @@ fi
 
 echo "Installing selected items..."
 selected_scripts=()
+
+# If special "all" was selected, expand to the full list that was shown
+for __sel in "${selected_names[@]:-}"; do
+    if [[ "$__sel" == "all" ]]; then
+        selected_names=("${scripts[@]}")
+        break
+    fi
+done
 
 # Idempotent alias add/update
 add_or_update_alias() {
