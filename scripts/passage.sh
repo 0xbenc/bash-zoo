@@ -263,7 +263,7 @@ truncate_text() {
 }
 
 colored_label_for_index() {
-  local idx="$1" w="${2-}" l star_colored="" out
+  local idx="$1" w="${2-}" l star_colored="" out pre last
   l="$(format_label "${list_paths[$idx]}")"
   if [[ -n "$w" ]]; then
     if [[ "${list_pins[$idx]}" == "1" ]]; then
@@ -271,14 +271,21 @@ colored_label_for_index() {
       # reserve 2 chars for star + space in visible width
       local avail=$(( w - 2 )); (( avail < 0 )) && avail=0
       out="$(truncate_text "$l" "$avail")"
-      printf '%s%s%s%s' "$star_colored" "$FG_BLUE" "$out" "$RESET"
+      # Split visible text at the last separator to color the tail differently
+      last="${out##* | }"
+      pre="${out%${last}}"
+      printf '%s%s%s%s%s%s' "$star_colored" "$FG_BLUE" "$pre" "$FG_WHITE" "$last" "$RESET"
     else
       out="$(truncate_text "$l" "$w")"
-      printf '%s%s%s' "$FG_BLUE" "$out" "$RESET"
+      last="${out##* | }"
+      pre="${out%${last}}"
+      printf '%s%s%s%s%s' "$FG_BLUE" "$pre" "$FG_WHITE" "$last" "$RESET"
     fi
   else
     [[ "${list_pins[$idx]}" == "1" ]] && star_colored="${FG_YELLOW}★ ${RESET}"
-    printf '%s%s%s%s' "$star_colored" "$FG_BLUE" "$l" "$RESET"
+    last="${l##* | }"
+    pre="${l%${last}}"
+    printf '%s%s%s%s%s%s' "$star_colored" "$FG_BLUE" "$pre" "$FG_WHITE" "$last" "$RESET"
   fi
 }
 
