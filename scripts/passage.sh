@@ -123,7 +123,7 @@ state_toggle_pin() { local path="$1"; [[ "$(state_get_pin "$path")" == 1 ]] && s
 state_unpin_all() { local i; for i in "${!state_pins[@]}"; do state_pins[$i]="0"; done; }
 state_clear_recents() { local i; for i in "${!state_used[@]}"; do state_used[$i]="0"; done; }
 
-format_label() { local entry="$1"; printf '%s' "${entry//\// > }"; }
+format_label() { local entry="$1"; printf '%s' "${entry//\// | }"; }
 
 CLIPBOARD_TOOL_LAST=""
 clipboard_copy() {
@@ -225,16 +225,148 @@ load_listing_arrays() {
   fi
 }
 
+term_cols() {
+  local c cols st
+  c="${COLUMNS:-}"
+  if [[ "$c" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$c"; return 0
+  fi
+  if command -v tput >/dev/null 2>&1; then
+    cols="$(tput cols 2>/dev/null || true)"
+    if [[ "$cols" =~ ^[0-9]+$ ]]; then
+      printf '%s\n' "$cols"; return 0
+    fi
+  fi
+  st="$(stty size 2>/dev/null | awk '{print $2}')"
+  if [[ "$st" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$st"; return 0
+  fi
+  printf '80\n'
+}
+
+# Visible label without ANSI color for width calculations
+visible_label_for_index() {
+  local idx="$1" l star_txt=""
+  l="$(format_label "${list_paths[$idx]}")"
+  [[ "${list_pins[$idx]}" == "1" ]] && star_txt='★ '
+  printf '%s%s' "$star_txt" "$l"
+}
+
+# Colored label for display
+truncate_text() {
+  local s="$1" w="$2"
+  local n=${#s}
+  if (( w <= 0 )); then printf '' ; return 0; fi
+  if (( n <= w )); then printf '%s' "$s"; return 0; fi
+  if (( w <= 3 )); then printf '%.*s' "$w" "$s"; return 0; fi
+  printf '%s' "${s:0:w-3}..."
+}
+
+colored_label_for_index() {
+  local idx="$1" w="${2-}" l star_colored="" out
+  l="$(format_label "${list_paths[$idx]}")"
+  if [[ -n "$w" ]]; then
+    if [[ "${list_pins[$idx]}" == "1" ]]; then
+      star_colored="${FG_YELLOW}★ ${RESET}"
+      # reserve 2 chars for star + space in visible width
+      local avail=$(( w - 2 )); (( avail < 0 )) && avail=0
+      out="$(truncate_text "$l" "$avail")"
+      printf '%s%s%s%s' "$star_colored" "$FG_BLUE" "$out" "$RESET"
+    else
+      out="$(truncate_text "$l" "$w")"
+      printf '%s%s%s' "$FG_BLUE" "$out" "$RESET"
+    fi
+  else
+    [[ "${list_pins[$idx]}" == "1" ]] && star_colored="${FG_YELLOW}★ ${RESET}"
+    printf '%s%s%s%s' "$star_colored" "$FG_BLUE" "$l" "$RESET"
+  fi
+}
+
 print_listing() {
   local total=${#list_paths[@]}
-  local i star
+  local i
   printf '%sEntries:%s %s%d%s\n' "$BOLD$FG_CYAN" "$RESET" "$FG_GREEN" "$total" "$RESET"
-  for ((i=0; i<total; i++)); do
-    star=""; [[ "${list_pins[$i]}" == "1" ]] && star="${FG_YELLOW}★ ${RESET}"
-    printf '  %2d) %s%s%s  %s%s%s\n' \
-      $((i+1)) "$BOLD$FG_CYAN" "$star" "$RESET" \
-      "$FG_BLUE" "${list_displays[$i]}" "$RESET"
+
+  # Compute responsive layout (two columns only if both entries fit without truncation)
+  local cols idx_digits idx_field_w gap i j max_left_block
+  local -a pair_ok
+  cols="$(term_cols)"
+  # index field width: at least 2 digits (matches %2d formatting)
+  idx_digits=${#total}; (( idx_digits < 2 )) && idx_digits=2
+  idx_field_w=$(( idx_digits + 4 ))  # two leading spaces + ") "
+  gap=3
+  # First pass: decide which adjacent pairs (n,n+1) fit without padding
+  local any_pair=0 left_len right_len pair_w n label
+  pair_ok=()
+  for ((n=0; n+1<total; n++)); do
+    label="$(visible_label_for_index "$n")"; left_len=${#label}
+    label="$(visible_label_for_index "$((n+1))")"; right_len=${#label}
+    pair_w=$(( idx_field_w + left_len + gap + idx_field_w + right_len ))
+    if (( pair_w <= cols )); then
+      pair_ok[n]=1; any_pair=1
+    else
+      pair_ok[n]=0
+    fi
   done
+
+  if (( any_pair )); then
+    # Compute alignment width only across pairs that fit
+    max_left_block=0
+    for ((n=0; n+1<total; n++)); do
+      if [[ "${pair_ok[n]:-0}" -eq 1 ]]; then
+        label="$(visible_label_for_index "$n")"
+        local left_block=$(( idx_field_w + ${#label} ))
+        (( left_block > max_left_block )) && max_left_block=$left_block
+      fi
+    done
+
+    # Drop pairs that no longer fit when padded to aligned left width
+    any_pair=0
+    local req
+    for ((n=0; n+1<total; n++)); do
+      if [[ "${pair_ok[n]:-0}" -eq 1 ]]; then
+        label="$(visible_label_for_index "$((n+1))")"; right_len=${#label}
+        req=$(( max_left_block + gap + idx_field_w + right_len ))
+        if (( req <= cols )); then
+          pair_ok[n]=1; any_pair=1
+        else
+          pair_ok[n]=0
+        fi
+      fi
+    done
+
+  fi
+
+  if (( any_pair )); then
+    # Mixed layout: pair when it cleanly fits; otherwise print single-column rows
+    local pad left_block label_l
+    n=0
+    while (( n < total )); do
+      if (( n+1 < total )) && [[ "${pair_ok[n]:-0}" -eq 1 ]]; then
+        label_l="$(visible_label_for_index "$n")"
+        left_block=$(( idx_field_w + ${#label_l} ))
+        printf '  %*d) ' "$idx_digits" $((n+1))
+        printf '%s' "$(colored_label_for_index "$n")"
+        pad=$(( max_left_block - left_block ))
+        (( pad > 0 )) && printf '%*s' "$pad" ''
+        printf '%*s' "$gap" ''
+        printf '  %*d) ' "$idx_digits" $((n+2))
+        printf '%s' "$(colored_label_for_index "$((n+1))")"
+        printf '\n'
+        n=$(( n + 2 ))
+      else
+        printf '  %*d) ' "$idx_digits" $((n+1))
+        printf '%s\n' "$(colored_label_for_index "$n")"
+        n=$(( n + 1 ))
+      fi
+    done
+  else
+    # One-column layout
+    for ((i=0; i<total; i++)); do
+      printf '  %*d) ' "$idx_digits" $((i+1))
+      printf '%s\n' "$(colored_label_for_index "$i")"
+    done
+  fi
 }
 
 perform_copy() {
