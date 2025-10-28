@@ -50,6 +50,10 @@ ensure_state_dir() { mkdir -p "$STATE_DIR"; }
 # Lowercase helper
 to_lower() { tr '[:upper:]' '[:lower:]'; }
 
+# Mark listing cache dirty to trigger rebuild on next refresh
+LISTING_DIRTY=1
+mark_listing_dirty() { LISTING_DIRTY=1; }
+
 # In-memory state
 state_paths=(); state_pins=(); state_used=()
 
@@ -101,6 +105,7 @@ state_touch() {
   else
     state_used[$idx]="$now"
   fi
+  mark_listing_dirty
 }
 
 state_get_pin() {
@@ -117,11 +122,12 @@ state_set_pin() {
   else
     state_pins[$idx]="$val"
   fi
+  mark_listing_dirty
 }
 
 state_toggle_pin() { local path="$1"; [[ "$(state_get_pin "$path")" == 1 ]] && state_set_pin "$path" 0 || state_set_pin "$path" 1; }
-state_unpin_all() { local i; for i in "${!state_pins[@]}"; do state_pins[$i]="0"; done; }
-state_clear_recents() { local i; for i in "${!state_used[@]}"; do state_used[$i]="0"; done; }
+state_unpin_all() { local i; for i in "${!state_pins[@]}"; do state_pins[$i]="0"; done; mark_listing_dirty; }
+state_clear_recents() { local i; for i in "${!state_used[@]}"; do state_used[$i]="0"; done; mark_listing_dirty; }
 
 format_label() { local entry="$1"; printf '%s' "${entry//\// | }"; }
 
@@ -158,28 +164,40 @@ clipboard_copy() {
 
 discover_entries() {
   [[ -d "$PASSWORD_STORE_DIR" ]] || die "Password store directory '$PASSWORD_STORE_DIR' does not exist."
-  find "$PASSWORD_STORE_DIR" -type f -name '*.gpg' -print | while IFS= read -r file; do
-    local rel="${file#$PASSWORD_STORE_DIR/}"; rel="${rel%.gpg}"; printf '%s\n' "$rel"
-  done | sort -u
+  # Prefer fd/fdfind for speed; fallback to find
+  if command -v fd >/dev/null 2>&1; then
+    fd -a -t f -e gpg . "$PASSWORD_STORE_DIR" | sed -e "s#^$PASSWORD_STORE_DIR/##" -e 's/\.gpg$//'
+  elif command -v fdfind >/dev/null 2>&1; then
+    fdfind -a -t f -e gpg . "$PASSWORD_STORE_DIR" | sed -e "s#^$PASSWORD_STORE_DIR/##" -e 's/\.gpg$//'
+  else
+    find "$PASSWORD_STORE_DIR" -type f -name '*.gpg' -print | \
+      sed -e "s#^$PASSWORD_STORE_DIR/##" -e 's/\.gpg$//'
+  fi | LC_ALL=C sort -u
 }
 
 build_sorted_listing() {
   # Output: path<TAB>display<TAB>pin<TAB>used
-  local entries_tmp rows path pin used idx label star
+  local entries_tmp joined_tmp rows path pin used label star
   entries_tmp=$(mktemp "${TMPDIR:-/tmp}/passage_entries.XXXXXX")
   discover_entries > "$entries_tmp"
 
+  joined_tmp=$(mktemp "${TMPDIR:-/tmp}/passage_join.XXXXXX")
+  if [[ -f "$STATE_FILE" ]]; then
+    awk -v OFS='\t' 'FNR==NR {pin[$1]=$2; used[$1]=$3; next} {p=$0; up=pin[p]; uu=used[p]; if (up=="") up=0; if (uu=="") uu=0; print p, up, uu}' \
+      "$STATE_FILE" "$entries_tmp" > "$joined_tmp"
+  else
+    awk -v OFS='\t' '{print $0, 0, 0}' "$entries_tmp" > "$joined_tmp"
+  fi
+
   rows=$(mktemp "${TMPDIR:-/tmp}/passage_rows.XXXXXX")
-  while IFS= read -r path; do
+  while IFS=$'\t' read -r path pin used; do
     [[ -z "$path" ]] && continue
-    pin=$(state_get_pin "$path")
-    idx=$(state_find_index "$path" || true)
-    used=0; [[ "$idx" != "-1" ]] && used="${state_used[$idx]}"
     label="$(format_label "$path")"; star=""; [[ "$pin" == "1" ]] && star="${FG_YELLOW}★ ${RESET}"
     printf '%s\t%010d\t%s\t%s%s\t%s\t%s\n' "$pin" "$used" "$path" "$star" "$label" "$pin" "$used" >> "$rows"
-  done < "$entries_tmp"
-  sort -t $'\t' -k1,1nr -k2,2nr -k3,3 "$rows" | awk -F '\t' '{ printf "%s\t%s\t%s\t%s\n", $3, $4, $6, $7 }'
-  rm -f "$entries_tmp" "$rows"
+  done < "$joined_tmp"
+
+  LC_ALL=C sort -t $'\t' -k1,1nr -k2,2nr -k3,3 "$rows" | awk -F '\t' '{ printf "%s\t%s\t%s\t%s\n", $3, $4, $6, $7 }'
+  rm -f "$entries_tmp" "$joined_tmp" "$rows"
 }
 
 pass_decrypt() { pass show -- "$1"; }
@@ -203,25 +221,43 @@ reveal_until_clear() {
 
 require_deps() { command -v pass >/dev/null 2>&1 || die "Missing dependency: pass"; }
 
+# Full cached listing arrays
+full_paths=(); full_displays=(); full_pins=(); full_used=()
+
+refresh_full_listing() {
+  full_paths=(); full_displays=(); full_pins=(); full_used=()
+  while IFS=$'\t' read -r p d pin used; do
+    full_paths+=("$p"); full_displays+=("$d"); full_pins+=("$pin"); full_used+=("$used")
+  done < <(build_sorted_listing)
+  LISTING_DIRTY=0
+}
+
 # Load current listing into arrays, optionally filtered by a substring.
 list_paths=(); list_displays=(); list_pins=(); list_used=()
 load_listing_arrays() {
   local filter="${1-}"
   list_paths=(); list_displays=(); list_pins=(); list_used=()
+  if [[ ${#full_paths[@]} -eq 0 || ${LISTING_DIRTY:-1} -eq 1 ]]; then
+    refresh_full_listing
+  fi
   if [[ -z "$filter" ]]; then
-    while IFS=$'\t' read -r p d pin used; do
-      list_paths+=("$p"); list_displays+=("$d"); list_pins+=("$pin"); list_used+=("$used")
-    done < <(build_sorted_listing)
+    list_paths=("${full_paths[@]}")
+    list_displays=("${full_displays[@]}")
+    list_pins=("${full_pins[@]}")
+    list_used=("${full_used[@]}")
   else
-    local f_lc p_lc d_lc
+    local f_lc p_lc d_lc i
     f_lc=$(printf '%s' "$filter" | to_lower)
-    while IFS=$'\t' read -r p d pin used; do
-      p_lc=$(printf '%s' "$p" | to_lower)
-      d_lc=$(printf '%s' "$d" | to_lower)
+    for i in "${!full_paths[@]}"; do
+      p_lc=$(printf '%s' "${full_paths[$i]}" | to_lower)
+      d_lc=$(printf '%s' "${full_displays[$i]}" | to_lower)
       if [[ "$p_lc" == *"$f_lc"* || "$d_lc" == *"$f_lc"* ]]; then
-        list_paths+=("$p"); list_displays+=("$d"); list_pins+=("$pin"); list_used+=("$used")
+        list_paths+=("${full_paths[$i]}")
+        list_displays+=("${full_displays[$i]}")
+        list_pins+=("${full_pins[$i]}")
+        list_used+=("${full_used[$i]}")
       fi
-    done < <(build_sorted_listing)
+    done
   fi
 }
 

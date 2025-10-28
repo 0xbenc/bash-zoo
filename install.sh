@@ -3,20 +3,35 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 [--all] [--exp]" >&2
+  echo "Usage: $0 [--all] [--exp] [--names <a,b,c>]" >&2
 }
 
 select_all=0
 include_exp=0
+names_csv=""
+names_given=0
 if [[ $# -gt 0 ]]; then
-  for arg in "$@"; do
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
     case "$arg" in
       --all|-a|all)
         select_all=1
-        ;;
+        shift ;;
       --exp)
         include_exp=1
-        ;;
+        shift ;;
+      --names)
+        if [[ $# -lt 2 ]]; then
+          echo "--names requires a comma-separated argument" >&2
+          exit 1
+        fi
+        names_csv="$2"
+        names_given=1
+        shift 2 ;;
+      --names=*)
+        names_csv="${arg#*=}"
+        names_given=1
+        shift ;;
       --help|-h)
         usage
         exit 0
@@ -364,52 +379,54 @@ if [[ $include_exp -eq 0 ]]; then
     scripts_desc=("${filtered_desc[@]}")
 fi
 
-# Group zapp + zapper into a single selectable pair "zapps"
-zapp_idx=-1
-zapper_idx=-1
-for i in "${!scripts[@]}"; do
-    case "${scripts[i]}" in
-        zapp)   zapp_idx=$i ;;
-        zapper) zapper_idx=$i ;;
-    esac
-done
-if [[ $zapp_idx -ge 0 || $zapper_idx -ge 0 ]]; then
-    new_scripts=()
-    new_has_deps=()
-    new_desc=()
+# Group zapp + zapper into a single selectable pair "zapps" (only for interactive mode)
+if [[ $names_given -eq 0 ]]; then
+    zapp_idx=-1
+    zapper_idx=-1
     for i in "${!scripts[@]}"; do
-        name="${scripts[i]}"
-        # Skip individual entries; we will add the grouped one below
-        if [[ "$name" == "zapp" || "$name" == "zapper" ]]; then
-            continue
-        fi
-        new_scripts+=("$name")
-        new_has_deps+=("${scripts_has_deps[i]}")
-        new_desc+=("${scripts_desc[i]}")
+        case "${scripts[i]}" in
+            zapp)   zapp_idx=$i ;;
+            zapper) zapper_idx=$i ;;
+        esac
     done
-    # Insert grouped entry once if either exists for this OS
-    new_scripts+=("zapps")
-    # has_deps is "yes" if either zapp or zapper had deps
-    dep_flag="no"
-    if [[ $zapp_idx -ge 0 && "${scripts_has_deps[$zapp_idx]}" == "yes" ]]; then dep_flag="yes"; fi
-    if [[ $zapper_idx -ge 0 && "${scripts_has_deps[$zapper_idx]}" == "yes" ]]; then dep_flag="yes"; fi
-    new_has_deps+=("$dep_flag")
-    # Build a concise description for the grouped entry
-    z_desc=""
-    if [[ $zapp_idx -ge 0 && -n "${scripts_desc[$zapp_idx]}" ]]; then
-      z_desc+="zapp — ${scripts_desc[$zapp_idx]}"
+    if [[ $zapp_idx -ge 0 || $zapper_idx -ge 0 ]]; then
+        new_scripts=()
+        new_has_deps=()
+        new_desc=()
+        for i in "${!scripts[@]}"; do
+            name="${scripts[i]}"
+            # Skip individual entries; we will add the grouped one below
+            if [[ "$name" == "zapp" || "$name" == "zapper" ]]; then
+                continue
+            fi
+            new_scripts+=("$name")
+            new_has_deps+=("${scripts_has_deps[i]}")
+            new_desc+=("${scripts_desc[i]}")
+        done
+        # Insert grouped entry once if either exists for this OS
+        new_scripts+=("zapps")
+        # has_deps is "yes" if either zapp or zapper had deps
+        dep_flag="no"
+        if [[ $zapp_idx -ge 0 && "${scripts_has_deps[$zapp_idx]}" == "yes" ]]; then dep_flag="yes"; fi
+        if [[ $zapper_idx -ge 0 && "${scripts_has_deps[$zapper_idx]}" == "yes" ]]; then dep_flag="yes"; fi
+        new_has_deps+=("$dep_flag")
+        # Build a concise description for the grouped entry
+        z_desc=""
+        if [[ $zapp_idx -ge 0 && -n "${scripts_desc[$zapp_idx]}" ]]; then
+          z_desc+="zapp — ${scripts_desc[$zapp_idx]}"
+        fi
+        if [[ $zapper_idx -ge 0 && -n "${scripts_desc[$zapper_idx]}" ]]; then
+          [[ -n "$z_desc" ]] && z_desc+=$'\n'
+          z_desc+="zapper — ${scripts_desc[$zapper_idx]}"
+        fi
+        if [[ -z "$z_desc" ]]; then
+          z_desc="zapp + zapper helpers for managing apps in ~/zapps"
+        fi
+        new_desc+=("$z_desc")
+        scripts=("${new_scripts[@]}")
+        scripts_has_deps=("${new_has_deps[@]}")
+        scripts_desc=("${new_desc[@]}")
     fi
-    if [[ $zapper_idx -ge 0 && -n "${scripts_desc[$zapper_idx]}" ]]; then
-      [[ -n "$z_desc" ]] && z_desc+=$'\n'
-      z_desc+="zapper — ${scripts_desc[$zapper_idx]}"
-    fi
-    if [[ -z "$z_desc" ]]; then
-      z_desc="zapp + zapper helpers for managing apps in ~/zapps"
-    fi
-    new_desc+=("$z_desc")
-    scripts=("${new_scripts[@]}")
-    scripts_has_deps=("${new_has_deps[@]}")
-    scripts_desc=("${new_desc[@]}")
 fi
 
 if [[ ${#scripts[@]} -eq 0 ]]; then
@@ -478,7 +495,11 @@ ensure_enquirer() {
 
 # Build JSON payload for the Node-based selector
 selected_names=()
-if [[ $select_all -eq 1 ]]; then
+if [[ $names_given -eq 1 ]]; then
+    # Bypass interactive selection; trust provided names
+    include_exp=1
+    IFS=',' read -r -a selected_names <<< "$names_csv"
+elif [[ $select_all -eq 1 ]]; then
     echo "Selecting all available scripts for $OS_TYPE."
     selected_names=("${scripts[@]}")
 else
@@ -603,6 +624,9 @@ for i in "${!scripts[@]}"; do
         fi
     done
 done
+
+# Always install bash-zoo meta CLI (not part of selection)
+
 
 # Determine robust install target directory
 resolve_target_dir() {
@@ -741,6 +765,65 @@ install_file() {
     chmod +x "$dst" 2>/dev/null || true
 }
 
+install_bash_zoo() {
+    local dst_dir="$1"
+    local dst="$dst_dir/bash-zoo"
+    local src="$PWD/$SCRIPTS_DIR/bash-zoo.sh"
+    local version
+    if [[ -f "$PWD/VERSION" ]]; then
+        version=$(cat "$PWD/VERSION")
+    else
+        version="0.0.0"
+    fi
+    mkdir -p "$dst_dir"
+    # Embed version by replacing @VERSION@
+    if sed --version >/dev/null 2>&1; then
+        sed "s/@VERSION@/${version//\//\/}/g" "$src" > "$dst"
+    else
+        # macOS/BSD sed
+        sed -e "s/@VERSION@/${version//\//\/}/g" "$src" > "$dst"
+    fi
+    chmod +x "$dst" 2>/dev/null || true
+}
+
+install_selector_script() {
+    local share_root
+    share_root=$(resolve_share_root)
+    mkdir -p "$share_root"
+    if [[ -f "$PWD/bin/select.js" ]]; then
+        cp -f "$PWD/bin/select.js" "$share_root/select.js" 2>/dev/null || true
+    fi
+}
+
+write_installed_metadata() {
+    # Args: names as positional parameters
+    local share_root meta_file version
+    share_root=$(resolve_share_root)
+    meta_file="$share_root/installed.json"
+    mkdir -p "$share_root"
+    if [[ -f "$PWD/VERSION" ]]; then
+        version=$(cat "$PWD/VERSION")
+    else
+        version="0.0.0"
+    fi
+    # Build JSON array of names
+    local out="[" first=1 n
+    for n in "$@"; do
+        # Skip the meta CLI itself
+        if [[ "$n" == "bash-zoo" ]]; then
+            continue
+        fi
+        if [[ $first -eq 1 ]]; then
+            out+="\"$n\""; first=0
+        else
+            out+=",\"$n\""
+        fi
+    done
+    out+="]"
+    printf '{"version":"%s","installed":%s}\n' "$version" "$out" > "$meta_file"
+    echo "Wrote metadata: $meta_file"
+}
+
 install_astra_launcher() {
     local dst_dir="$1"
     local dst="$dst_dir/astra"
@@ -851,74 +934,95 @@ EOF
 }
 
 # Perform installation: prefer bin dir, fallback to aliases per-script
-if [[ ${#selected_scripts[@]} -gt 0 ]]; then
-    USER_SHELL=$(basename "${SHELL:-}")
-    RC_FILE=""
-    case "$USER_SHELL" in
-        bash) RC_FILE="$HOME/.bashrc" ;;
-        zsh)  RC_FILE="$HOME/.zshrc" ;;
-        *)    RC_FILE="$HOME/.bashrc" ;;
-    esac
+USER_SHELL=$(basename "${SHELL:-}")
+RC_FILE=""
+case "$USER_SHELL" in
+    bash) RC_FILE="$HOME/.bashrc" ;;
+    zsh)  RC_FILE="$HOME/.zshrc" ;;
+    *)    RC_FILE="$HOME/.bashrc" ;;
+esac
 
-    target_dir=$(resolve_target_dir)
-    if [[ -n "${BZ_SYMLINK:-}" ]]; then
-        echo "BZ_SYMLINK is no longer supported; installing launchers as copies." >&2
-    fi
+target_dir=$(resolve_target_dir)
+if [[ -n "${BZ_SYMLINK:-}" ]]; then
+    echo "BZ_SYMLINK is no longer supported; installing launchers as copies." >&2
+fi
 
-    installed_to_bin=()
-    installed_as_alias=()
+installed_to_bin=()
+installed_as_alias=()
 
     if ensure_dir "$target_dir" && is_writable_dir "$target_dir"; then
-        for script in "${selected_scripts[@]}"; do
-            if [[ "$script" == "astra" ]]; then
-                if install_astra_launcher "$target_dir"; then
-                    installed_to_bin+=("$script")
-                else
-                    src="$PWD/$SCRIPTS_DIR/$script.sh"
-                    add_or_update_alias "$script" "$src" "$RC_FILE"
-                    installed_as_alias+=("$script")
-                fi
-                continue
-            fi
-
-            src="$PWD/$SCRIPTS_DIR/$script.sh"
-            if install_file "$src" "$target_dir" "$script"; then
+        # Install selected tools (if any)
+        for script in "${selected_scripts[@]:-}"; do
+        if [[ "$script" == "astra" ]]; then
+            if install_astra_launcher "$target_dir"; then
                 installed_to_bin+=("$script")
             else
+                src="$PWD/$SCRIPTS_DIR/$script.sh"
                 add_or_update_alias "$script" "$src" "$RC_FILE"
                 installed_as_alias+=("$script")
             fi
-        done
-    else
-        echo "Note: Unable to write to $target_dir; falling back to aliases in $RC_FILE"
-        for script in "${selected_scripts[@]}"; do
-            add_or_update_alias "$script" "$PWD/$SCRIPTS_DIR/$script.sh" "$RC_FILE"
-            installed_as_alias+=("$script")
-        done
-    fi
-
-    # Ensure PATH if we installed any into bin
-    if [[ ${#installed_to_bin[@]} -gt 0 ]]; then
-        if path_has_dir "$target_dir"; then
-            echo "PATH already includes $target_dir"
-        else
-            echo "Adding $target_dir to PATH in $RC_FILE ..."
-            add_path_line "$RC_FILE" "$target_dir"
-            echo "Added."
+            continue
         fi
+
+        src="$PWD/$SCRIPTS_DIR/$script.sh"
+        if install_file "$src" "$target_dir" "$script"; then
+            installed_to_bin+=("$script")
+        else
+            add_or_update_alias "$script" "$src" "$RC_FILE"
+            installed_as_alias+=("$script")
+        fi
+    done
+
+    # Always install meta CLI
+    if install_bash_zoo "$target_dir"; then
+        installed_to_bin+=("bash-zoo")
+    else
+        echo "Warning: failed to install bash-zoo CLI to $target_dir" >&2
     fi
 
-    # Summaries
-    if [[ ${#installed_to_bin[@]} -gt 0 ]]; then
-        echo "Installed to $target_dir: ${installed_to_bin[*]}"
-    fi
-    if [[ ${#installed_as_alias[@]} -gt 0 ]]; then
-        echo "Configured aliases in $RC_FILE: ${installed_as_alias[*]}"
-    fi
+    # Copy interactive selector script into share dir for meta CLI use
+    install_selector_script
 else
-    echo "No items selected. Exiting."
-    exit 0
+    echo "Note: Unable to write to $target_dir; falling back to aliases in $RC_FILE"
+    for script in "${selected_scripts[@]:-}"; do
+        add_or_update_alias "$script" "$PWD/$SCRIPTS_DIR/$script.sh" "$RC_FILE"
+        installed_as_alias+=("$script")
+    done
+    # Try to install bash-zoo even if target_dir initially unwritable (mkdir -p might fix)
+    if ensure_dir "$target_dir" && is_writable_dir "$target_dir"; then
+        if install_bash_zoo "$target_dir"; then
+            installed_to_bin+=("bash-zoo")
+        fi
+    else
+        echo "Warning: could not install bash-zoo binary; alias fallback would require repo — skipped" >&2
+    fi
+
+    # Ensure selector script is available for meta CLI
+    install_selector_script
 fi
+
+# Ensure PATH if we installed any into bin
+if [[ ${#installed_to_bin[@]} -gt 0 ]]; then
+    if path_has_dir "$target_dir"; then
+        echo "PATH already includes $target_dir"
+    else
+        echo "Adding $target_dir to PATH in $RC_FILE ..."
+        add_path_line "$RC_FILE" "$target_dir"
+        echo "Added."
+    fi
+fi
+
+# Summaries
+if [[ ${#installed_to_bin[@]} -gt 0 ]]; then
+    echo "Installed to $target_dir: ${installed_to_bin[*]}"
+fi
+if [[ ${#installed_as_alias[@]} -gt 0 ]]; then
+    echo "Configured aliases in $RC_FILE: ${installed_as_alias[*]}"
+fi
+
+# Write metadata of installed tools (bins + aliases)
+installed_all=("${installed_to_bin[@]:-}" "${installed_as_alias[@]:-}")
+write_installed_metadata "${installed_all[@]:-}"
 
 echo "Installation complete!"
 echo "Open a new terminal or run:"

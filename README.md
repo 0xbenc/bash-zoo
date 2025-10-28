@@ -48,6 +48,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 - [Daily Use](#daily-use)
 - [Upgrading](#upgrading)
 - [Uninstall](#uninstall)
+- [Meta CLI](#meta-cli)
 - [Credits](#credits)
 - [License](#license)
 
@@ -327,3 +328,18 @@ Then restart your shell so aliases disappear: `exec "$SHELL" -l`.
 ## License
 
 [MIT](LICENSE)
+## Meta CLI
+
+`bash-zoo` is an always-installed meta CLI:
+
+- `bash-zoo version` — print the installed meta CLI version.
+- `bash-zoo uninstall [--all]` — remove installed tools and aliases without needing the repo.
+- `bash-zoo update passwords` — run `git pull` in each first-level folder of `~/.password-store` and summarize results.
+
+Examples
+
+```bash
+bash-zoo version
+bash-zoo update passwords
+bash-zoo uninstall --all
+```

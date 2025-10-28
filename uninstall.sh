@@ -258,7 +258,6 @@ done
 
 if [[ ${#item_ids[@]} -eq 0 ]]; then
   echo "No Bash Zoo aliases or installed binaries found."
-  exit 0
 fi
 
 selected_ids=()
@@ -268,7 +267,9 @@ if [[ $select_all -eq 1 ]]; then
 else
   # Build selection payload
   payload='{ "title": "Select items to remove", "choices": ['
-  payload+='{"name":"all","message":"All (aliases + binaries)","summary":"Remove every listed item"},'
+  # Add explicit META option first, then ALL
+  payload+='{"name":"meta-cli","message":"Remove meta CLI (bash-zoo)","summary":"Also remove the bash-zoo command"},'
+  payload+='{"name":"all","message":"All (aliases + binaries)","summary":"Remove every listed item (excludes meta CLI)"},'
   for j in "${!item_ids[@]}"; do
     id="${item_ids[$j]}"
     label="${item_labels[$j]}"
@@ -286,22 +287,27 @@ else
       selected_ids+=("$__sel")
     done < <(BZ_PAYLOAD="$payload" NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" node "bin/select.js")
   else
-    # Fallback minimal TUI with an explicit "All" row (hjkl)
+    # Fallback minimal TUI with two synthetic rows: META and ALL (hjkl)
     current=0
     selected=()
     for _ in "${item_ids[@]}"; do selected+=(0); done
+    meta_selected=0
     all_selected=0
     total_items=${#item_ids[@]}
     draw_menu() {
       clear
       echo "Use 'J'/'K' to move, 'H' to toggle, 'L' to confirm."
-      # Render the synthetic All row at top
+      # META row (index 0)
       if [[ $current -eq 0 ]]; then echo -ne "\e[1;32m> "; else echo -ne "  "; fi
+      if [[ $meta_selected -eq 1 ]]; then echo -ne "[✔ ] "; else echo -ne "[ ] "; fi
+      echo -e "Remove meta CLI (bash-zoo)\e[0m"
+      # ALL row (index 1)
+      if [[ $current -eq 1 ]]; then echo -ne "\e[1;32m> "; else echo -ne "  "; fi
       if [[ $all_selected -eq 1 ]]; then echo -ne "[✔ ] "; else echo -ne "[ ] "; fi
       echo -e "All (aliases + binaries)\e[0m"
-      # Render real items
+      # Render real items start at visual row 2
       for j in "${!item_ids[@]}"; do
-        idx=$((j+1))
+        idx=$((j+2))
         if [[ $idx -eq $current ]]; then echo -ne "\e[1;32m> "; else echo -ne "  "; fi
         if [[ ${selected[j]} -eq 1 ]]; then echo -ne "[✔ ] "; else echo -ne "[ ] "; fi
         echo -e "${item_labels[$j]}\e[0m"
@@ -312,12 +318,13 @@ else
       read -rsn1 key
       case "$key" in
         "k") # up
-          ((current = (current - 1 + (total_items + 1)) % (total_items + 1))) ;;
+          ((current = (current - 1 + (total_items + 2)) % (total_items + 2))) ;;
         "j") # down
-          ((current = (current + 1) % (total_items + 1))) ;;
+          ((current = (current + 1) % (total_items + 2))) ;;
         "h") # toggle selection
           if [[ $current -eq 0 ]]; then
-            # Toggle all
+            meta_selected=$((1 - meta_selected))
+          elif [[ $current -eq 1 ]]; then
             if [[ $all_selected -eq 1 ]]; then
               all_selected=0
               for i in "${!selected[@]}"; do selected[$i]=0; done
@@ -326,7 +333,7 @@ else
               for i in "${!selected[@]}"; do selected[$i]=1; done
             fi
           else
-            idx=$((current-1))
+            idx=$((current-2))
             selected[$idx]=$((1 - selected[$idx]))
             # Keep all_selected in sync
             all_selected=1
@@ -338,13 +345,28 @@ else
         "l") break ;;
       esac
     done
-    for j in "${!selected[@]}"; do
-      if [[ ${selected[j]} -eq 1 ]]; then selected_ids+=("${item_ids[$j]}"); fi
-    done
+    # Persist selection
+    if [[ $meta_selected -eq 1 ]]; then selected_ids+=("meta-cli"); fi
+    if [[ $all_selected -eq 1 ]]; then
+      for j in "${!item_ids[@]}"; do selected_ids+=("${item_ids[$j]}"); done
+    else
+      for j in "${!selected[@]}"; do
+        if [[ ${selected[j]} -eq 1 ]]; then selected_ids+=("${item_ids[$j]}"); fi
+      done
+    fi
   fi
 fi
 
-# If special "all" was selected via the enquirer UI, expand to full set
+# Track whether meta CLI should be removed (kept separate from "all")
+remove_meta_cli=0
+for __sel in "${selected_ids[@]:-}"; do
+  if [[ "$__sel" == "meta-cli" ]]; then
+    remove_meta_cli=1
+    break
+  fi
+done
+
+# If special "all" was selected via the enquirer UI, expand to full set (meta excluded)
 for __sel in "${selected_ids[@]:-}"; do
   if [[ "$__sel" == "all" ]]; then
     selected_ids=("${item_ids[@]}")
@@ -376,6 +398,7 @@ delete_alias_line() {
 
 removed=0
 for sel in "${selected_ids[@]}"; do
+  [[ "$sel" == "meta-cli" ]] && continue
   # Find the item index by id
   for j in "${!item_ids[@]}"; do
     if [[ "${item_ids[$j]}" == "$sel" ]]; then
@@ -402,11 +425,23 @@ for sel in "${selected_ids[@]}"; do
   done
 done
 
+# Optionally remove meta CLI from user bin dirs
+if [[ $remove_meta_cli -eq 1 ]]; then
+  for d in "${BIN_DIRS[@]}"; do
+    if [[ -e "$d/bash-zoo" ]]; then
+      rm -f "$d/bash-zoo"
+      ((removed+=1))
+    fi
+  done
+fi
+
 # Clean up PATH lines we added (tagged with 'bash-zoo') if no more zoo bins remain
 RC_CAND=("$HOME/.bashrc" "$HOME/.zshrc")
 cleanup_path_lines=1
 for d in "${BIN_DIRS[@]}"; do
   any_left=0
+  # Keep PATH if meta CLI remains
+  if [[ -e "$d/bash-zoo" ]]; then any_left=1; fi
   for sfile in "$SCRIPTS_DIR"/*.sh; do
     [[ -f "$sfile" ]] || continue
     sname=$(basename "$sfile" .sh)
