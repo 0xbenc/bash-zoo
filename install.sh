@@ -438,62 +438,79 @@ fi
 chmod +x "$PWD/uninstall.sh" 2>/dev/null || true
 
 #############################################
-# Interactive selection (enquirer-style)
+# Interactive selection (gum only)
 #############################################
 
-ensure_enquirer() {
-    # Requires node; then ensures enquirer is resolvable (tries local vendor)
-    if ! command -v node >/dev/null 2>&1; then
-        return 1
-    fi
+# Ensure gum exists; on Linux, install Homebrew (Linuxbrew) if needed and use it
+ensure_gum() {
+  if command -v gum >/dev/null 2>&1; then
+    return 0
+  fi
 
-    # Check if enquirer is already resolvable (including via vendor path)
-    if NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" \
-       node -e "require('enquirer')" >/dev/null 2>&1; then
-        return 0
+  if [[ "$OS_TYPE" == "macos" ]]; then
+    if command -v brew >/dev/null 2>&1; then
+      echo "Preparing selector (installing gum via Homebrew)..."
+      brew list --versions gum >/dev/null 2>&1 || brew install gum >/dev/null 2>&1 || true
+      command -v gum >/dev/null 2>&1 && return 0
     fi
-
-    # Attempt to install enquirer to local vendor dir (.interactive)
-    mkdir -p "$PWD/.interactive"
-    if [[ ! -f "$PWD/.interactive/package.json" ]]; then
-        printf '{"name":"bash-zoo-interactive","private":true}\n' > "$PWD/.interactive/package.json"
-    fi
-
-    # Choose a package manager (prefer npm; fallback to pnpm/yarn/bun)
-    PM=""
-    if command -v npm >/dev/null 2>&1; then
-        PM="npm"
-    elif command -v pnpm >/dev/null 2>&1; then
-        PM="pnpm"
-    elif command -v yarn >/dev/null 2>&1; then
-        PM="yarn"
-    elif command -v bun >/dev/null 2>&1; then
-        PM="bun"
-    else
-        return 1
-    fi
-
-    echo "Preparing selector (installing enquirer)..."
-    case "$PM" in
-        npm)
-            ( cd "$PWD/.interactive" && npm install --silent enquirer@^2 ) || return 1 ;;
-        pnpm)
-            ( cd "$PWD/.interactive" && pnpm add -s enquirer@^2 ) || return 1 ;;
-        yarn)
-            ( cd "$PWD/.interactive" && yarn add -s enquirer@^2 ) || return 1 ;;
-        bun)
-            ( cd "$PWD/.interactive" && bun add -y enquirer@^2 ) || return 1 ;;
-    esac
-
-    # Re-check
-    if NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" \
-       node -e "require('enquirer')" >/dev/null 2>&1; then
-        return 0
-    fi
+    # As requested, do not attempt other fallbacks; require brew-managed gum
     return 1
+  fi
+
+  if [[ "$OS_TYPE" == "debian" ]]; then
+    # Helper to find brew path after install
+    find_brew_bin() {
+      if command -v brew >/dev/null 2>&1; then
+        command -v brew
+        return 0
+      fi
+      for prefix in /home/linuxbrew/.linuxbrew "$HOME/.linuxbrew"; do
+        if [[ -x "$prefix/bin/brew" ]]; then
+          echo "$prefix/bin/brew"
+          return 0
+        fi
+      done
+      return 1
+    }
+
+    install_homebrew_linux() {
+      if find_brew_bin >/dev/null 2>&1; then
+        return 0
+      fi
+      echo "Installing Homebrew for Linux (non-interactive)..."
+      local tmp_dir installer
+      tmp_dir=$(mktemp -d)
+      installer="$tmp_dir/install-homebrew.sh"
+      # Best-effort fetch; honors set -e but we guard with || return 1 to keep clear error path
+      if curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$installer"; then
+        chmod +x "$installer" || true
+        NONINTERACTIVE=1 /bin/bash "$installer"
+      fi
+      rm -rf "$tmp_dir" 2>/dev/null || true
+      find_brew_bin >/dev/null 2>&1
+    }
+
+    # Install brew if not present
+    if ! find_brew_bin >/dev/null 2>&1; then
+      install_homebrew_linux || true
+    fi
+
+    local brew_bin=""
+    if brew_bin=$(find_brew_bin); then
+      # Bring brew into PATH for this process
+      eval "$($brew_bin shellenv)"
+      echo "Preparing selector (installing gum via Homebrew for Linux)..."
+      "$brew_bin" list --versions gum >/dev/null 2>&1 || "$brew_bin" install gum >/dev/null 2>&1 || true
+      command -v gum >/dev/null 2>&1 && return 0
+    fi
+
+    return 1
+  fi
+
+  return 1
 }
 
-# Build JSON payload for the Node-based selector
+# Build selection (gum only)
 selected_names=()
 if [[ $names_given -eq 1 ]]; then
     # Bypass interactive selection; trust provided names
@@ -503,43 +520,38 @@ elif [[ $select_all -eq 1 ]]; then
     echo "Selecting all available scripts for $OS_TYPE."
     selected_names=("${scripts[@]}")
 else
-    payload='{ "title": "Select tools to install", "choices": ['
-    # Add an explicit "all" option at the top for quick select-all
-    payload+='{"name":"all","message":"All (everything below)","summary":"Install every available tool"},'
-    for i in "${!scripts[@]}"; do
-        label="${scripts[i]}"
-        if [[ "${scripts[i]}" == "zapps" ]]; then
-            label="zapps (zapp + zapper)"
-        fi
-        # escape quotes in label just in case
-        esc_label=$(printf '%s' "$label" | sed 's/"/\\"/g')
-        esc_name=$(printf '%s' "${scripts[i]}" | sed 's/"/\\"/g')
-        # escape description/summary safely; also collapse CR/LF to spaces
-        summary="${scripts_desc[i]:-}"
-        summary=${summary//$'\r'/ }
-        summary=${summary//$'\n'/ }
-        esc_summary=$(printf '%s' "$summary" | sed 's/\\/\\\\/g; s/"/\\"/g')
-        payload+="{\"name\":\"$esc_name\",\"message\":\"$esc_label\",\"summary\":\"$esc_summary\"},"
-    done
-    # Trim trailing comma and close array
-    payload=${payload%,}
-    payload+='] }'
-
-    # Run the selector; collect selected names (one per line)
-    if ! ensure_enquirer; then
-        echo "Error: enquirer is required for interactive selection." >&2
-        echo "- Ensure Node.js and a package manager (npm/pnpm/yarn/bun) are available." >&2
-        echo "- Or run with --all to install every available tool non-interactively." >&2
+    if ! ensure_gum; then
+        echo "Error: gum is required for interactive selection and could not be installed automatically." >&2
+        echo "- On macOS: install Homebrew and run 'brew install gum'." >&2
+        echo "- On Debian/Ubuntu: ensure network access, then re-run install so Homebrew for Linux can be bootstrapped automatically." >&2
+        echo "Alternatively, use --all or --names to run without the interactive UI." >&2
         exit 1
     fi
+
+    gum_labels=()
+    gum_labels+=("all — All (everything below)")
+    for i in "${!scripts[@]}"; do
+        _name="${scripts[i]}"
+        _label="$_name"
+        if [[ "$_name" == "zapps" ]]; then
+            _label="zapps (zapp + zapper)"
+        fi
+        _summary="${scripts_desc[i]:-}"
+        _summary=${_summary//$'\r'/ }
+        _summary=${_summary//$'\n'/ }
+        if [[ -n "$_summary" ]]; then
+            gum_labels+=("$_label — $_summary")
+        else
+            gum_labels+=("$_label")
+        fi
+    done
     selected_names=()
-    # Pass payload in env var to keep stdin/tty free for interactivity
     while IFS= read -r __sel_line; do
         [[ -z "${__sel_line:-}" ]] && continue
-        selected_names+=("$__sel_line")
-    done < <(BZ_PAYLOAD="$payload" NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" node "bin/select.js")
-
-    clear
+        __name="${__sel_line%%[[:space:]]*}"
+        selected_names+=("$__name")
+    done < <(printf '%s\n' "${gum_labels[@]}" | gum choose --no-limit --header "Select tools to install")
+    clear || true
 fi
 
 echo "Installing selected items..."
@@ -786,15 +798,6 @@ install_bash_zoo() {
     chmod +x "$dst" 2>/dev/null || true
 }
 
-install_selector_script() {
-    local share_root
-    share_root=$(resolve_share_root)
-    mkdir -p "$share_root"
-    if [[ -f "$PWD/bin/select.js" ]]; then
-        cp -f "$PWD/bin/select.js" "$share_root/select.js" 2>/dev/null || true
-    fi
-}
-
 write_installed_metadata() {
     # Args: names as positional parameters
     local share_root meta_file version
@@ -980,8 +983,7 @@ installed_as_alias=()
         echo "Warning: failed to install bash-zoo CLI to $target_dir" >&2
     fi
 
-    # Copy interactive selector script into share dir for meta CLI use
-    install_selector_script
+    #
 else
     echo "Note: Unable to write to $target_dir; falling back to aliases in $RC_FILE"
     for script in "${selected_scripts[@]:-}"; do
@@ -997,8 +999,7 @@ else
         echo "Warning: could not install bash-zoo binary; alias fallback would require repo — skipped" >&2
     fi
 
-    # Ensure selector script is available for meta CLI
-    install_selector_script
+    #
 fi
 
 # Ensure PATH if we installed any into bin

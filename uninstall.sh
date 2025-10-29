@@ -2,11 +2,10 @@
 
 set -euo pipefail
 
-# Uninstall aliases added by the Bash Zoo installer.
+# Uninstall aliases and binaries installed by Bash Zoo.
 # - Removes installed binaries from stable bin dirs and/or aliases.
 # - Scans ~/.bashrc and ~/.zshrc for alias lines pointing to scripts/*.sh
-# - Lets you interactively select which to remove
-# - Works with enquirer (Node) if available; falls back to a minimal TUI
+# - Uses gum for the interactive picker; bootstraps Homebrew on Linux if needed.
 
 usage() {
   echo "Usage: $0 [--all]" >&2
@@ -38,43 +37,68 @@ BIN_DIRS=("$HOME/.local/bin" "$HOME/bin")
 # Candidate RC files to scan (installer writes to one of these)
 RC_CANDIDATES=("$HOME/.bashrc" "$HOME/.zshrc")
 
-ensure_enquirer() {
-  if ! command -v node >/dev/null 2>&1; then
-    return 1
+# OS detection (macos, debian, other)
+OS_TYPE="other"
+UNAME_S=$(uname -s)
+if [[ "$UNAME_S" == "Darwin" ]]; then
+  OS_TYPE="macos"
+elif [[ "$UNAME_S" == "Linux" ]]; then
+  if command -v apt >/dev/null 2>&1 || command -v apt-get >/dev/null 2>&1; then
+    OS_TYPE="debian"
   fi
-  if NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" \
-     node -e "require('enquirer')" >/dev/null 2>&1; then
+fi
+
+# Ensure gum exists; on Linux, bootstrap Homebrew (Linuxbrew) and install gum
+ensure_gum() {
+  if command -v gum >/dev/null 2>&1; then
     return 0
   fi
-  mkdir -p "$PWD/.interactive"
-  if [[ ! -f "$PWD/.interactive/package.json" ]]; then
-    printf '{"name":"bash-zoo-interactive","private":true}\n' > "$PWD/.interactive/package.json"
-  fi
-
-  local PM=""
-  if command -v npm >/dev/null 2>&1; then
-    PM="npm"
-  elif command -v pnpm >/dev/null 2>&1; then
-    PM="pnpm"
-  elif command -v yarn >/dev/null 2>&1; then
-    PM="yarn"
-  elif command -v bun >/dev/null 2>&1; then
-    PM="bun"
-  else
+  if [[ "$OS_TYPE" == "macos" ]]; then
+    if command -v brew >/dev/null 2>&1; then
+      echo "Preparing selector (installing gum via Homebrew)..."
+      brew list --versions gum >/dev/null 2>&1 || brew install gum >/dev/null 2>&1 || true
+      command -v gum >/dev/null 2>&1 && return 0
+    fi
     return 1
   fi
-
-  echo "Preparing selector (installing enquirer)..."
-  case "$PM" in
-    npm)  ( cd "$PWD/.interactive" && npm install --silent enquirer@^2 ) || return 1 ;;
-    pnpm) ( cd "$PWD/.interactive" && pnpm add -s enquirer@^2 ) || return 1 ;;
-    yarn) ( cd "$PWD/.interactive" && yarn add -s enquirer@^2 ) || return 1 ;;
-    bun)  ( cd "$PWD/.interactive" && bun add -y enquirer@^2 ) || return 1 ;;
-  esac
-
-  if NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" \
-     node -e "require('enquirer')" >/dev/null 2>&1; then
-    return 0
+  if [[ "$OS_TYPE" == "debian" ]]; then
+    find_brew_bin() {
+      if command -v brew >/dev/null 2>&1; then
+        command -v brew
+        return 0
+      fi
+      for prefix in /home/linuxbrew/.linuxbrew "$HOME/.linuxbrew"; do
+        if [[ -x "$prefix/bin/brew" ]]; then
+          echo "$prefix/bin/brew"
+          return 0
+        fi
+      done
+      return 1
+    }
+    install_homebrew_linux() {
+      if find_brew_bin >/dev/null 2>&1; then return 0; fi
+      echo "Installing Homebrew for Linux (non-interactive)..."
+      local tmp_dir installer
+      tmp_dir=$(mktemp -d)
+      installer="$tmp_dir/install-homebrew.sh"
+      if curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$installer"; then
+        chmod +x "$installer" || true
+        NONINTERACTIVE=1 /bin/bash "$installer"
+      fi
+      rm -rf "$tmp_dir" 2>/dev/null || true
+      find_brew_bin >/dev/null 2>&1
+    }
+    if ! find_brew_bin >/dev/null 2>&1; then
+      install_homebrew_linux || true
+    fi
+    local brew_bin=""
+    if brew_bin=$(find_brew_bin); then
+      eval "$($brew_bin shellenv)"
+      echo "Preparing selector (installing gum via Homebrew for Linux)..."
+      "$brew_bin" list --versions gum >/dev/null 2>&1 || "$brew_bin" install gum >/dev/null 2>&1 || true
+      command -v gum >/dev/null 2>&1 && return 0
+    fi
+    return 1
   fi
   return 1
 }
@@ -265,96 +289,22 @@ if [[ $select_all -eq 1 ]]; then
   echo "Selecting all installed items for removal."
   selected_ids=("${item_ids[@]}")
 else
-  # Build selection payload
-  payload='{ "title": "Select items to remove", "choices": ['
-  # Add explicit META option first, then ALL
-  payload+='{"name":"meta-cli","message":"Remove meta CLI (bash-zoo)","summary":"Also remove the bash-zoo command"},'
-  payload+='{"name":"all","message":"All (aliases + binaries)","summary":"Remove every listed item (excludes meta CLI)"},'
-  for j in "${!item_ids[@]}"; do
-    id="${item_ids[$j]}"
-    label="${item_labels[$j]}"
-    esc_label=$(printf '%s' "$label" | sed 's/"/\\"/g')
-    summary="${item_summaries[$j]}"
-    esc_summary=$(printf '%s' "$summary" | sed 's/"/\\"/g')
-    payload+="{\"name\":\"$id\",\"message\":\"$esc_label\",\"summary\":\"$esc_summary\"},"
-  done
-  payload=${payload%,}
-  payload+='] }'
-
-  if ensure_enquirer; then
-    while IFS= read -r __sel; do
-      [[ -z "${__sel:-}" ]] && continue
-      selected_ids+=("$__sel")
-    done < <(BZ_PAYLOAD="$payload" NODE_PATH="$PWD/.interactive/node_modules${NODE_PATH:+:$NODE_PATH}" node "bin/select.js")
-  else
-    # Fallback minimal TUI with two synthetic rows: META and ALL (hjkl)
-    current=0
-    selected=()
-    for _ in "${item_ids[@]}"; do selected+=(0); done
-    meta_selected=0
-    all_selected=0
-    total_items=${#item_ids[@]}
-    draw_menu() {
-      clear
-      echo "Use 'J'/'K' to move, 'H' to toggle, 'L' to confirm."
-      # META row (index 0)
-      if [[ $current -eq 0 ]]; then echo -ne "\e[1;32m> "; else echo -ne "  "; fi
-      if [[ $meta_selected -eq 1 ]]; then echo -ne "[✔ ] "; else echo -ne "[ ] "; fi
-      echo -e "Remove meta CLI (bash-zoo)\e[0m"
-      # ALL row (index 1)
-      if [[ $current -eq 1 ]]; then echo -ne "\e[1;32m> "; else echo -ne "  "; fi
-      if [[ $all_selected -eq 1 ]]; then echo -ne "[✔ ] "; else echo -ne "[ ] "; fi
-      echo -e "All (aliases + binaries)\e[0m"
-      # Render real items start at visual row 2
-      for j in "${!item_ids[@]}"; do
-        idx=$((j+2))
-        if [[ $idx -eq $current ]]; then echo -ne "\e[1;32m> "; else echo -ne "  "; fi
-        if [[ ${selected[j]} -eq 1 ]]; then echo -ne "[✔ ] "; else echo -ne "[ ] "; fi
-        echo -e "${item_labels[$j]}\e[0m"
-      done
-    }
-    while true; do
-      draw_menu
-      read -rsn1 key
-      case "$key" in
-        "k") # up
-          ((current = (current - 1 + (total_items + 2)) % (total_items + 2))) ;;
-        "j") # down
-          ((current = (current + 1) % (total_items + 2))) ;;
-        "h") # toggle selection
-          if [[ $current -eq 0 ]]; then
-            meta_selected=$((1 - meta_selected))
-          elif [[ $current -eq 1 ]]; then
-            if [[ $all_selected -eq 1 ]]; then
-              all_selected=0
-              for i in "${!selected[@]}"; do selected[$i]=0; done
-            else
-              all_selected=1
-              for i in "${!selected[@]}"; do selected[$i]=1; done
-            fi
-          else
-            idx=$((current-2))
-            selected[$idx]=$((1 - selected[$idx]))
-            # Keep all_selected in sync
-            all_selected=1
-            for i in "${!selected[@]}"; do
-              if [[ ${selected[$i]} -eq 0 ]]; then all_selected=0; break; fi
-            done
-          fi
-          ;;
-        "l") break ;;
-      esac
-    done
-    # Persist selection
-    if [[ $meta_selected -eq 1 ]]; then selected_ids+=("meta-cli"); fi
-    if [[ $all_selected -eq 1 ]]; then
-      for j in "${!item_ids[@]}"; do selected_ids+=("${item_ids[$j]}"); done
-    else
-      for j in "${!selected[@]}"; do
-        if [[ ${selected[j]} -eq 1 ]]; then selected_ids+=("${item_ids[$j]}"); fi
-      done
-    fi
+  if ! ensure_gum; then
+    echo "Error: gum is required for interactive selection and could not be installed automatically." >&2
+    echo "- Use --all to remove everything except the meta CLI without prompts." >&2
+    exit 1
   fi
+  gum_labels=()
+  gum_labels+=("meta-cli — Remove meta CLI (bash-zoo)")
+  gum_labels+=("all — All (aliases + binaries)")
+  for j in "${!item_ids[@]}"; do
+    gum_labels+=("${item_ids[$j]} — ${item_labels[$j]}")
+  done
+  while IFS= read -r __sel; do
+    [[ -z "${__sel:-}" ]] && continue
+    selected_ids+=("${__sel%%[[:space:]]*}")
+  done < <(printf '%s\n' "${gum_labels[@]}" | gum choose --no-limit --header "Select items to remove")
+  clear || true
 fi
 
 # Track whether meta CLI should be removed (kept separate from "all")
@@ -366,7 +316,7 @@ for __sel in "${selected_ids[@]:-}"; do
   fi
 done
 
-# If special "all" was selected via the enquirer UI, expand to full set (meta excluded)
+# If special "all" was selected via the UI, expand to full set (meta excluded)
 for __sel in "${selected_ids[@]:-}"; do
   if [[ "$__sel" == "all" ]]; then
     selected_ids=("${item_ids[@]}")

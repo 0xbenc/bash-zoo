@@ -249,6 +249,7 @@ cd bash-zoo
 - Include experimental tools by adding `--exp` (e.g., `./install.sh --exp`).
 - Skip prompts with `./install.sh --all` (respects `--exp` filtering).
 - Interactive picker also includes an "All" option to select everything.
+- Uses `gum` for the interactive selector. On macOS, the installer uses Homebrew to install `gum` when missing. On Linux (Debian/Ubuntu), the installer bootstraps Homebrew for Linux if needed and then installs `gum`.
 
 ### Option B — Manual pick-and-run
 
@@ -314,7 +315,7 @@ The installer is idempotent: re-running only tweaks what changed and offers new 
 ./uninstall.sh --all  # remove every Bash Zoo alias and binary in one go
 ```
 
-The interactive uninstaller also includes an "All" option for quick removal.
+The interactive uninstaller uses `gum` and also includes an "All" option for quick removal. On Linux, it will bootstrap Homebrew if needed to install `gum` automatically.
 
 Then restart your shell so aliases disappear: `exec "$SHELL" -l`.
 
