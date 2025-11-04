@@ -220,7 +220,8 @@ for repo in "${repos[@]}"; do
 done
 
 if [[ ${#out_repo[@]} -eq 0 ]]; then
-  echo "${FG_GREEN}All repositories are clean and pushed.${RESET}"
+  # Explicitly state nothing needs attention (was easy to miss before)
+  printf '%s\n' "${FG_GREEN}No repositories need attention.${RESET}"
   exit 0
 fi
 
