@@ -149,7 +149,11 @@ for repo in "${repos[@]}"; do
       remote_failed=0
       remote_commit=""
       if [[ $do_network -eq 1 ]]; then
-        remote_commit="$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes" git -C "$repo" ls-remote --exit-code "$up_remote" "$up_merge" 2>/dev/null | awk 'NR==1 {print $1}')"
+        # Guard the pipeline with '|| true' so pipefail doesn't abort the script
+        # when the remote is unreachable or the ref doesn't exist.
+        remote_commit="$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes" \
+          git -C "$repo" ls-remote --exit-code "$up_remote" "$up_merge" 2>/dev/null \
+          | awk 'NR==1 {print $1}' || true)"
         if [[ -z "$remote_commit" ]]; then
           remote_failed=1
         fi
