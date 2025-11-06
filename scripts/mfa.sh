@@ -279,26 +279,40 @@ render_progress() {
 }
 
 copy_to_clipboard() {
-  local otp="$1"
+  local text="$1"
+
+  # Mirror passage's robust clipboard strategy:
+  # - Prefer pbcopy on macOS
+  # - On Linux, choose wl-copy vs xclip order based on Wayland/X11
+  # - Never crash the script on failure; try next tool
 
   if command -v pbcopy >/dev/null 2>&1; then
-    printf '%s' "$otp" | pbcopy
-    return 0
+    if printf '%s' "$text" | pbcopy >/dev/null 2>&1; then return 0; fi
   fi
 
-  if command -v wl-copy >/dev/null 2>&1; then
-    printf '%s' "$otp" | wl-copy
-    return 0
+  local try_wayland=0
+  if [[ -n "${WAYLAND_DISPLAY-}" ]]; then
+    try_wayland=1
   fi
 
-  if command -v xclip >/dev/null 2>&1; then
-    printf '%s' "$otp" | xclip -selection clipboard
-    return 0
+  if (( try_wayland )); then
+    if command -v wl-copy >/dev/null 2>&1; then
+      if printf '%s' "$text" | wl-copy >/dev/null 2>&1; then return 0; fi
+    fi
+    if command -v xclip >/dev/null 2>&1; then
+      if printf '%s' "$text" | xclip -selection clipboard >/dev/null 2>&1; then return 0; fi
+    fi
+  else
+    if command -v xclip >/dev/null 2>&1; then
+      if printf '%s' "$text" | xclip -selection clipboard >/dev/null 2>&1; then return 0; fi
+    fi
+    if command -v wl-copy >/dev/null 2>&1; then
+      if printf '%s' "$text" | wl-copy >/dev/null 2>&1; then return 0; fi
+    fi
   fi
 
   if command -v xsel >/dev/null 2>&1; then
-    printf '%s' "$otp" | xsel --clipboard --input
-    return 0
+    if printf '%s' "$text" | xsel --clipboard --input >/dev/null 2>&1; then return 0; fi
   fi
 
   return 1
