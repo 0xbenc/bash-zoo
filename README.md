@@ -300,10 +300,26 @@ Need a refresher inside the CLI? Run `<tool> --help` or read the source — each
 
 ## Upgrading
 
+If you’ve installed the meta CLI, prefer the self-update command:
+
+```bash
+bash-zoo update zoo             # refresh installed tools + meta CLI
+bash-zoo update zoo --dry-run   # show what would change
+```
+
+Developing locally? Point updates at a working tree:
+
+```bash
+bash-zoo update zoo --from /path/to/local/clone --dry-run
+bash-zoo update zoo --from /path/to/local/clone
+```
+
+You can still update via git + installer when working in the repo:
+
 ```bash
 cd path/to/bash-zoo
 git pull
-./install.sh         # Re-run to pick up new tools or dependencies
+./install.sh         # re-run to pick up new tools or dependencies
 ```
 
 The installer is idempotent: re-running only tweaks what changed and offers new toys as they land.
@@ -336,11 +352,13 @@ Then restart your shell so aliases disappear: `exec "$SHELL" -l`.
 - `bash-zoo version` — print the installed meta CLI version.
 - `bash-zoo uninstall [--all]` — remove installed tools and aliases without needing the repo.
 - `bash-zoo update passwords` — run `git pull` in each first-level folder of `~/.password-store` and summarize results.
+ - `bash-zoo update zoo` — refresh installed tools and the meta CLI from a source repo (or a local folder via `--from`).
 
 Examples
 
 ```bash
 bash-zoo version
 bash-zoo update passwords
+bash-zoo update zoo --dry-run
 bash-zoo uninstall --all
 ```

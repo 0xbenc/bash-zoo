@@ -8,6 +8,8 @@ set -euo pipefail
 
 # Version is embedded at install time by install.sh
 BASH_ZOO_VERSION="@VERSION@"
+# Default repository URL embedded at install time (may be empty when unknown)
+BASH_ZOO_REPO_URL="@REPO_URL@"
 
 print_usage() {
   cat <<'EOF'
@@ -18,12 +20,14 @@ Usage:
   bash-zoo version
   bash-zoo uninstall [--all]
   bash-zoo update passwords
+  bash-zoo update zoo [--from PATH] [--repo URL] [--branch BR] [--dry-run] [--force] [--no-meta]
 
 Commands:
   help                 Show this help.
   version              Print the installed bash-zoo version.
   uninstall [--all]    Remove installed tools and aliases. Use --all to skip prompts.
   update passwords     Pull latest for each subfolder in ~/.password-store.
+  update zoo           Refresh installed tools and the meta CLI from source.
 EOF
 }
 
@@ -68,6 +72,432 @@ resolve_share_root() {
 ensure_dir() {
   local d="$1"
   [[ -d "$d" ]] || mkdir -p "$d"
+}
+
+# Install a file atomically within its directory using a temp file + mv
+atomic_install_file() {
+  local src="$1" dst="$2"
+  local dir tmp
+  dir=$(dirname "$dst")
+  ensure_dir "$dir"
+  tmp="$dir/.zoo.$$.$RANDOM.tmp"
+  # Copy to a temp neighbor and then move into place
+  cp -f "$src" "$tmp" 2>/dev/null || cp "$src" "$tmp"
+  mv -f "$tmp" "$dst"
+}
+
+# Replace a directory atomically: stage new at sibling, swap with double-rename
+atomic_replace_dir() {
+  local src_dir="$1" target_dir="$2"
+  local parent stage bak
+  parent=$(dirname "$target_dir")
+  ensure_dir "$parent"
+  stage="$parent/.zoo.$$.stage"
+  bak="$parent/.zoo.$$.bak"
+  rm -rf "$stage" "$bak" 2>/dev/null || true
+  mkdir -p "$stage"
+  # Copy contents into stage
+  # shellcheck disable=SC2164
+  (cd "$src_dir" && tar cf - .) | (cd "$stage" && tar xf -) || return 1
+  # Perform double-rename swap
+  if [[ -e "$target_dir" ]]; then
+    mv "$target_dir" "$bak"
+  fi
+  mv "$stage" "$target_dir"
+  rm -rf "$bak" 2>/dev/null || true
+}
+
+# Simple semantic version compare: echoes -1, 0, or 1
+version_compare() {
+  local a b IFS=.
+  a="$1"; b="$2"
+  # Strip non-numeric suffixes for comparison
+  a=${a%%[^0-9.]*}
+  b=${b%%[^0-9.]*}
+  local -a av=(0 0 0 0) bv=(0 0 0 0)
+  local i=0 part
+  IFS=. read -r av0 av1 av2 av3 <<<"$a"
+  IFS=. read -r bv0 bv1 bv2 bv3 <<<"$b"
+  av[0]=${av0:-0}; av[1]=${av1:-0}; av[2]=${av2:-0}; av[3]=${av3:-0}
+  bv[0]=${bv0:-0}; bv[1]=${bv1:-0}; bv[2]=${bv2:-0}; bv[3]=${bv3:-0}
+  for i in 0 1 2 3; do
+    if (( av[$i] > bv[$i] )); then echo 1; return 0; fi
+    if (( av[$i] < bv[$i] )); then echo -1; return 0; fi
+  done
+  echo 0
+}
+
+read_installed_metadata() {
+  # Outputs via global vars: INST_VER, INST_COMMIT, INST_REPO_URL
+  # and global array INST_LIST (names only, excludes meta CLI)
+  INST_VER="0.0.0"; INST_COMMIT="unknown"; INST_REPO_URL=""
+  INST_LIST=()
+  local share_root meta_file
+  share_root=$(resolve_share_root)
+  meta_file="$share_root/installed.json"
+  if [[ ! -f "$meta_file" ]]; then
+    return 0
+  fi
+  local line
+  line=$(tr -d '\n' < "$meta_file" 2>/dev/null || true)
+  if [[ -n "$line" ]]; then
+    case "$line" in
+      *"version"*) INST_VER=$(printf '%s' "$line" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p') ;; esac
+    case "$line" in
+      *"commit"*) INST_COMMIT=$(printf '%s' "$line" | sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p') ;; esac
+    case "$line" in
+      *"repo_url"*) INST_REPO_URL=$(printf '%s' "$line" | sed -n 's/.*"repo_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p') ;; esac
+    # Parse installed list
+    if printf '%s' "$line" | grep -q '"installed"'; then
+      local arr
+      arr=$(printf '%s' "$line" | sed -n 's/.*"installed"[[:space:]]*:[[:space:]]*\[\(.*\)\].*/\1/p')
+      # Split on commas and strip quotes/spaces
+      IFS=, read -r -a __items <<<"$arr"
+      local it name
+      for it in "${__items[@]:-}"; do
+        name=$(printf '%s' "$it" | sed -e 's/^[[:space:]]*"//' -e 's/"[[:space:]]*$//')
+        if [[ -n "$name" && "$name" != "bash-zoo" ]]; then
+          INST_LIST+=("$name")
+        fi
+      done
+    fi
+  fi
+}
+
+write_installed_metadata_update() {
+  # Args: version commit repo_url installed_names...
+  local version="$1" commit="$2" repo_url="$3"; shift 3
+  local share_root meta_file
+  share_root=$(resolve_share_root)
+  meta_file="$share_root/installed.json"
+  ensure_dir "$share_root"
+  # Build JSON array
+  local out="[" first=1 n
+  for n in "$@"; do
+    if [[ "$n" == "bash-zoo" || -z "$n" ]]; then continue; fi
+    if [[ $first -eq 1 ]]; then out+="\"$n\""; first=0; else out+=",\"$n\""; fi
+  done
+  out+="]"
+  printf '{"version":"%s","commit":"%s","repo_url":"%s","installed":%s}\n' \
+    "$version" "${commit:-unknown}" "${repo_url:-}" "$out" > "$meta_file"
+}
+
+find_meta_cli_path() {
+  local p1 p2
+  p1="$HOME/.local/bin/bash-zoo"
+  p2="$HOME/bin/bash-zoo"
+  if [[ -e "$p1" ]]; then printf '%s\n' "$p1"; return 0; fi
+  if [[ -e "$p2" ]]; then printf '%s\n' "$p2"; return 0; fi
+  return 1
+}
+
+tool_bin_path() {
+  local name="$1" p
+  for p in "$HOME/.local/bin/$name" "$HOME/bin/$name"; do
+    if [[ -x "$p" ]]; then printf '%s\n' "$p"; return 0; fi
+  done
+  return 1
+}
+
+tool_is_alias_only() {
+  local name="$1" rc
+  if tool_bin_path "$name" >/dev/null 2>&1; then
+    return 1
+  fi
+  for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+    [[ -f "$rc" ]] || continue
+    if grep -qE "^alias[[:space:]]+$name=" "$rc" 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+render_meta_cli() {
+  # Args: src_repo_dir out_path version repo_url
+  local src_dir="$1" out="$2" version="$3" repo_url="$4"
+  local src="$src_dir/scripts/bash-zoo.sh"
+  if [[ ! -f "$src" ]]; then
+    return 1
+  fi
+  # Use sed without in-place to keep portability
+  if sed --version >/dev/null 2>&1; then
+    sed -e "s/@VERSION@/${version//\//\/}/g" \
+        -e "s|@REPO_URL@|${repo_url//\//\/}|g" "$src" > "$out"
+  else
+    sed -e "s/@VERSION@/${version//\//\/}/g" \
+        -e "s|@REPO_URL@|${repo_url//\//\/}|g" "$src" > "$out"
+  fi
+}
+
+update_zoo_cmd() {
+  # Options
+  local from_path="" repo_url="" branch="" dry_run=0 force=0 no_meta=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --from) from_path="$2"; shift 2 ;;
+      --from=*) from_path="${1#*=}"; shift ;;
+      --repo) repo_url="$2"; shift 2 ;;
+      --repo=*) repo_url="${1#*=}"; shift ;;
+      --branch) branch="$2"; shift 2 ;;
+      --branch=*) branch="${1#*=}"; shift ;;
+      --dry-run) dry_run=1; shift ;;
+      --force) force=1; shift ;;
+      --no-meta) no_meta=1; shift ;;
+      --help|-h) echo "Usage: bash-zoo update zoo [--from PATH] [--repo URL] [--branch BR] [--dry-run] [--force] [--no-meta]"; return 0 ;;
+      *) echo_err "Unknown option: $1"; return 1 ;;
+    esac
+  done
+
+  # Read installed metadata (best-effort)
+  read_installed_metadata
+  local installed_version="$INST_VER" installed_commit="$INST_COMMIT" installed_repo_url="$INST_REPO_URL"
+
+  # Determine source
+  local mode="clone" source_dir tmp_dir
+  if [[ -n "$from_path" ]]; then
+    mode="dev"
+    # Validate contents
+    if [[ ! -d "$from_path/scripts" || ! -f "$from_path/VERSION" ]]; then
+      echo_err "--from path must contain 'scripts/' and 'VERSION'"
+      return 1
+    fi
+    source_dir="$from_path"
+  else
+    # Determine repo URL precedence: flag -> env -> embedded
+    if [[ -z "$repo_url" ]]; then
+      if [[ -n "${BASH_ZOO_REPO_URL:-}" ]]; then
+        repo_url="$BASH_ZOO_REPO_URL"
+      fi
+    fi
+    if [[ -z "$repo_url" && -n "${INST_REPO_URL:-}" ]]; then
+      repo_url="$INST_REPO_URL"
+    fi
+    if [[ -z "$repo_url" ]]; then
+      echo_err "No repo URL available. Provide --repo or set BASH_ZOO_REPO_URL."
+      return 1
+    fi
+    if ! command -v git >/dev/null 2>&1; then
+      echo_err "git is required for cloning updates"
+      return 1
+    fi
+    tmp_dir=$(mktemp -d)
+    if [[ -n "$branch" ]]; then
+      if ! git clone --depth 1 --branch "$branch" "$repo_url" "$tmp_dir" >/dev/null 2>&1; then
+        echo_err "Failed to clone $repo_url (branch $branch)"
+        rm -rf "$tmp_dir" 2>/dev/null || true
+        return 1
+      fi
+    else
+      if ! git clone --depth 1 "$repo_url" "$tmp_dir" >/dev/null 2>&1; then
+        echo_err "Failed to clone $repo_url"
+        rm -rf "$tmp_dir" 2>/dev/null || true
+        return 1
+      fi
+    fi
+    source_dir="$tmp_dir"
+  fi
+
+  # Source metadata
+  local src_version src_commit
+  if [[ -f "$source_dir/VERSION" ]]; then
+    src_version=$(cat "$source_dir/VERSION")
+  else
+    src_version="0.0.0"
+  fi
+  if [[ "$mode" == "clone" ]]; then
+    src_commit=$(git -C "$source_dir" rev-parse --verify HEAD 2>/dev/null || echo "unknown")
+  else
+    src_commit="unknown"
+  fi
+
+  # Gate update (regular mode only, unless --force)
+  local allow_update=1 reason=""
+  if [[ $force -eq 1 ]]; then
+    allow_update=1
+  elif [[ "$mode" == "dev" ]]; then
+    allow_update=1
+  else
+    # Compare versions
+    local cmp; cmp=$(version_compare "$src_version" "${installed_version:-0.0.0}")
+    if [[ "$cmp" == "1" ]]; then
+      allow_update=1
+    elif [[ "$cmp" == "-1" ]]; then
+      allow_update=0; reason="source version older"
+    else
+      # Equal versions: check ancestry
+      if [[ -n "$installed_commit" && "$installed_commit" != "unknown" ]]; then
+        if git -C "$source_dir" merge-base --is-ancestor "$installed_commit" HEAD >/dev/null 2>&1; then
+          allow_update=1
+        else
+          # Possibly shallow; try deepening
+          if git -C "$source_dir" fetch --deepen 1000 >/dev/null 2>&1 || git -C "$source_dir" fetch --unshallow >/dev/null 2>&1; then
+            if git -C "$source_dir" merge-base --is-ancestor "$installed_commit" HEAD >/dev/null 2>&1; then
+              allow_update=1
+            else
+              allow_update=0; reason="installed commit not ancestor"
+            fi
+          else
+            allow_update=0; reason="ancestry unknown due to shallow clone"
+          fi
+        fi
+      else
+        allow_update=0; reason="installed commit unknown; equal versions"
+      fi
+    fi
+  fi
+
+  # Build installed set: discovered + metadata, dedup
+  local -a names; names=()
+  local seen=""
+  while IFS= read -r n; do
+    if [[ -z "$n" ]]; then continue; fi
+    case ",$seen," in *",$n,"*) ;; *) names+=("$n"); seen="$seen,$n" ;; esac
+  done < <(discover_installed_tools)
+  local m
+  for m in "${INST_LIST[@]:-}"; do
+    case ",$seen," in *",$m,"*) ;; *) names+=("$m"); seen="$seen,$m" ;; esac
+  done
+
+  local updated=0 uptodate=0 skipped=0 failed=0
+
+  # Update tools (bins only). Skip alias-only installs.
+  local name src_tool bin_path line_prefix
+  for name in "${names[@]:-}"; do
+    # Special-case astra: runtime assets handled later; skip bin here
+    if [[ "$name" == "astra" ]]; then
+      continue
+    fi
+    if tool_is_alias_only "$name"; then
+      line_prefix="[skipped-alias]"
+      if [[ $dry_run -eq 1 ]]; then line_prefix="[would-skipped-alias]"; fi
+      echo "$line_prefix $name"
+      ((skipped+=1))
+      continue
+    fi
+    if ! bin_path=$(tool_bin_path "$name"); then
+      # Not in bin; nothing to do
+      line_prefix="[skipped]"
+      if [[ $dry_run -eq 1 ]]; then line_prefix="[would-skipped]"; fi
+      echo "$line_prefix $name (no installed binary)"
+      ((skipped+=1))
+      continue
+    fi
+    src_tool="$source_dir/scripts/$name.sh"
+    if [[ ! -f "$src_tool" ]]; then
+      line_prefix="[skipped]"; [[ $dry_run -eq 1 ]] && line_prefix="[would-skipped]"
+      echo "$line_prefix $name (not found in source)"
+      ((skipped+=1))
+      continue
+    fi
+    # Gating
+    if [[ $allow_update -eq 0 ]]; then
+      line_prefix="[up-to-date]"; [[ $dry_run -eq 1 ]] && line_prefix="[would-up-to-date]"
+      echo "$line_prefix $name (repo gate: $reason)"
+      ((uptodate+=1))
+      continue
+    fi
+    if cmp -s "$src_tool" "$bin_path"; then
+      line_prefix="[up-to-date]"; [[ $dry_run -eq 1 ]] && line_prefix="[would-up-to-date]"
+      echo "$line_prefix $name"
+      ((uptodate+=1))
+    else
+      if [[ $dry_run -eq 1 ]]; then
+        echo "[would-updated] $name"
+      else
+        if atomic_install_file "$src_tool" "$bin_path"; then
+          echo "[updated] $name"
+        else
+          echo "[failed]  $name (install error)"; ((failed+=1)); continue
+        fi
+      fi
+      ((updated+=1))
+    fi
+  done
+
+  # Astra runtime sync if astra is installed
+  local have_astra=0 asrc="" share_root runtime_target
+  for m in "${names[@]:-}"; do if [[ "$m" == "astra" ]]; then have_astra=1; break; fi; done
+  if [[ $have_astra -eq 1 ]]; then
+    asrc="$source_dir/astra"
+    if [[ -d "$asrc" ]]; then
+      share_root=$(resolve_share_root)
+      runtime_target="$share_root/astra"
+      if [[ $allow_update -eq 0 ]]; then
+        line_prefix="[up-to-date]"; [[ $dry_run -eq 1 ]] && line_prefix="[would-up-to-date]"
+        echo "$line_prefix astra-runtime (repo gate: $reason)"
+        ((uptodate+=1))
+      else
+        if [[ $dry_run -eq 1 ]]; then
+          echo "[would-updated] astra-runtime"
+          ((updated+=1))
+        else
+          if atomic_replace_dir "$asrc" "$runtime_target"; then
+            echo "[updated] astra-runtime"
+            ((updated+=1))
+          else
+            echo "[failed]  astra-runtime (replace error)"; ((failed+=1))
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  # Meta CLI update (unless --no-meta)
+  if [[ $no_meta -ne 1 ]]; then
+    local meta_path="" rendered="" embed_url=""
+    if meta_path=$(find_meta_cli_path); then
+      embed_url="$repo_url"
+      if [[ -z "$embed_url" ]]; then embed_url="${BASH_ZOO_REPO_URL:-}"; fi
+      if [[ -z "$embed_url" ]]; then embed_url="${installed_repo_url:-}"; fi
+      rendered=$(mktemp)
+      if render_meta_cli "$source_dir" "$rendered" "$src_version" "$embed_url"; then
+        if [[ $allow_update -eq 0 ]]; then
+          line_prefix="[up-to-date]"; [[ $dry_run -eq 1 ]] && line_prefix="[would-up-to-date]"
+          echo "$line_prefix bash-zoo (repo gate: $reason)"
+          ((uptodate+=1))
+        else
+          if cmp -s "$rendered" "$meta_path"; then
+            line_prefix="[up-to-date]"; [[ $dry_run -eq 1 ]] && line_prefix="[would-up-to-date]"
+            echo "$line_prefix bash-zoo"
+            ((uptodate+=1))
+          else
+            if [[ $dry_run -eq 1 ]]; then
+              echo "[would-updated] bash-zoo"
+              ((updated+=1))
+            else
+              if atomic_install_file "$rendered" "$meta_path"; then
+                echo "[updated] bash-zoo"
+                ((updated+=1))
+              else
+                echo "[failed]  bash-zoo (install error)"; ((failed+=1))
+              fi
+            fi
+          fi
+        fi
+      fi
+      rm -f "$rendered" 2>/dev/null || true
+    fi
+  fi
+
+  # Merge installed names and write metadata
+  local merged=() dedup="," t
+  for t in "${names[@]:-}"; do
+    case "$dedup" in *",$t,"*) ;; *) merged+=("$t"); dedup="$dedup$t," ;; esac
+  done
+  # Use repo_url used for clone or fallbacks for metadata
+  local meta_repo_url="$repo_url"; [[ -z "$meta_repo_url" ]] && meta_repo_url="${installed_repo_url:-}"
+  if [[ $dry_run -eq 1 ]]; then
+    : # do not write metadata
+  else
+    write_installed_metadata_update "$src_version" "$src_commit" "$meta_repo_url" "${merged[@]:-}"
+  fi
+
+  echo "-- summary --"
+  echo "updated: $updated, up-to-date: $uptodate, failed: $failed, skipped: $skipped"
+
+  # Cleanup
+  if [[ "$mode" == "clone" && -n "${tmp_dir:-}" ]]; then rm -rf "$tmp_dir" 2>/dev/null || true; fi
 }
 
 ensure_gum() {
@@ -414,7 +844,8 @@ main() {
       shift
       case "${1-}" in
         passwords)  shift; update_passwords_cmd ;;
-        *) echo_err "Unknown update target. Use 'passwords'."; exit 1 ;;
+        zoo)        shift; update_zoo_cmd "$@" ;;
+        *) echo_err "Unknown update target. Use 'passwords' or 'zoo'."; exit 1 ;;
       esac
       ;;
     *) echo_err "Unknown command: $cmd"; print_usage; exit 1 ;;

@@ -781,26 +781,32 @@ install_bash_zoo() {
     local dst_dir="$1"
     local dst="$dst_dir/bash-zoo"
     local src="$PWD/$SCRIPTS_DIR/bash-zoo.sh"
-    local version
+    local version repo_url
     if [[ -f "$PWD/VERSION" ]]; then
         version=$(cat "$PWD/VERSION")
     else
         version="0.0.0"
     fi
+    # Best-effort repo URL (may be empty when not a git repo)
+    if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+        repo_url=$(git remote get-url origin 2>/dev/null || echo "")
+    else
+        repo_url=""
+    fi
     mkdir -p "$dst_dir"
-    # Embed version by replacing @VERSION@
+    # Embed placeholders @VERSION@ and @REPO_URL@
     if sed --version >/dev/null 2>&1; then
-        sed "s/@VERSION@/${version//\//\/}/g" "$src" > "$dst"
+        sed -e "s/@VERSION@/${version//\//\/}/g" -e "s|@REPO_URL@|${repo_url//\//\/}|g" "$src" > "$dst"
     else
         # macOS/BSD sed
-        sed -e "s/@VERSION@/${version//\//\/}/g" "$src" > "$dst"
+        sed -e "s/@VERSION@/${version//\//\/}/g" -e "s|@REPO_URL@|${repo_url//\//\/}|g" "$src" > "$dst"
     fi
     chmod +x "$dst" 2>/dev/null || true
 }
 
 write_installed_metadata() {
     # Args: names as positional parameters
-    local share_root meta_file version
+    local share_root meta_file version commit repo_url
     share_root=$(resolve_share_root)
     meta_file="$share_root/installed.json"
     mkdir -p "$share_root"
@@ -808,6 +814,13 @@ write_installed_metadata() {
         version=$(cat "$PWD/VERSION")
     else
         version="0.0.0"
+    fi
+    if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+        commit=$(git rev-parse --verify HEAD 2>/dev/null || echo "unknown")
+        repo_url=$(git remote get-url origin 2>/dev/null || echo "")
+    else
+        commit="unknown"
+        repo_url=""
     fi
     # Build JSON array of names
     local out="[" first=1 n
@@ -823,7 +836,7 @@ write_installed_metadata() {
         fi
     done
     out+="]"
-    printf '{"version":"%s","installed":%s}\n' "$version" "$out" > "$meta_file"
+    printf '{"version":"%s","commit":"%s","repo_url":"%s","installed":%s}\n' "$version" "${commit:-unknown}" "$repo_url" "$out" > "$meta_file"
     echo "Wrote metadata: $meta_file"
 }
 
