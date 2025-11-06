@@ -5,7 +5,8 @@ echo "Updating package list..."
 sudo apt update -y
 
 echo "Installing dependencies for passage (Debian/Ubuntu)..."
-sudo apt install -y pass xclip wl-clipboard
+# Add oathtool so passage can generate TOTP codes inline
+sudo apt install -y pass xclip wl-clipboard oathtool
 
 echo "Verifying installations..."
 for cmd in pass; do

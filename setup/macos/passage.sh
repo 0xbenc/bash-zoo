@@ -10,6 +10,8 @@ echo "Installing dependencies for passage (macOS via Homebrew)..."
 brew list gnupg >/dev/null 2>&1 || brew install gnupg
 brew list pinentry-mac >/dev/null 2>&1 || brew install pinentry-mac
 brew list pass >/dev/null 2>&1 || brew install pass
+# OATH Toolkit provides `oathtool` used for TOTP generation
+brew list oath-toolkit >/dev/null 2>&1 || brew install oath-toolkit
 :
 
 echo "Verifying installations..."

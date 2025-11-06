@@ -61,7 +61,7 @@ Schema (written by installer and updater; both tolerate missing fields):
 }
 ```
 
-- `version` — From repo `VERSION` at install/update time.
+- `version` — From repo `VERSION` at install/update time. The value is a monotonic revision string in the form `rN` (e.g., `r3`). Revisions supersede legacy semantic versions used previously; any `rN` is considered newer than any `0.x.y`.
 - `commit` — `git rev-parse HEAD` when available (unknown if not a git context).
 - `repo_url` — `git remote get-url origin` when available (empty otherwise).
 - `installed` — Union of tools installed as binaries and tools installed as aliases; excludes the meta CLI itself.
@@ -141,7 +141,8 @@ Concepts:
   - Regular mode: clones a repo (depth 1 by default), with precedence: `--repo` → `BASH_ZOO_REPO_URL` → embedded `BASH_ZOO_REPO_URL` → `installed.json.repo_url`.
   - Branch/ref: `--branch` or default remote HEAD.
 - Forward-only gate (regular mode):
-  - Compare `source VERSION` vs `installed.version`. If greater, allow.
+  - Compare `source VERSION` vs `installed.version` as revisions. If greater, allow.
+    - Revisions are `rN`; if either side is a legacy semver (`0.x.y`), treat any `rN` as newer than any semver.
   - If equal, ensure `installed.commit` is an ancestor of `source HEAD`.
     - If history is too shallow to check ancestry, deepen (`--deepen 1000` or `--unshallow`) and retry.
     - If still indeterminate, skip equal-version updates unless `--force`.
@@ -313,4 +314,3 @@ write_installed_metadata_update(version=src_version, commit, repo_url, names...)
 ---
 
 This document aims to encode the reasoning behind the implementation so agents can modify, extend, or debug the Bash Zoo with confidence while preserving its safety and portability guarantees.
-

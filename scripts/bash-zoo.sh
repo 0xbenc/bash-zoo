@@ -107,17 +107,36 @@ atomic_replace_dir() {
   rm -rf "$bak" 2>/dev/null || true
 }
 
-# Simple semantic version compare: echoes -1, 0, or 1
+# Version compare supporting legacy semver and new revisions (rN)
+# Returns: 1 if a>b, -1 if a<b, 0 if equal
 version_compare() {
-  local a b IFS=.
+  local a b
   a="$1"; b="$2"
-  # Strip non-numeric suffixes for comparison
-  a=${a%%[^0-9.]*}
-  b=${b%%[^0-9.]*}
+  # Detect revision form: rN or N
+  if [[ "$a" =~ ^[rR]?[0-9]+$ && "$b" =~ ^[rR]?[0-9]+$ ]]; then
+    local ai="${a#[rR]}" bi="${b#[rR]}"
+    if (( ai > bi )); then echo 1; return 0; fi
+    if (( ai < bi )); then echo -1; return 0; fi
+    echo 0; return 0
+  fi
+  # If only one is revision, treat revisions as newer than any semver
+  if [[ "$a" =~ ^[rR]?[0-9]+$ && ! "$b" =~ ^[rR]?[0-9]+$ ]]; then
+    echo 1; return 0
+  fi
+  if [[ "$b" =~ ^[rR]?[0-9]+$ && ! "$a" =~ ^[rR]?[0-9]+$ ]]; then
+    echo -1; return 0
+  fi
+  # Fallback: simple semantic version compare (major.minor.patch)
+  local IFS=.
+  local a_clean b_clean
+  a_clean="$a"; b_clean="$b"
+  # Remove any leading non-numeric text
+  a_clean=${a_clean##*[!0-9.]}
+  b_clean=${b_clean##*[!0-9.]}
   local -a av=(0 0 0 0) bv=(0 0 0 0)
-  local i=0 part
-  IFS=. read -r av0 av1 av2 av3 <<<"$a"
-  IFS=. read -r bv0 bv1 bv2 bv3 <<<"$b"
+  local av0 av1 av2 av3 bv0 bv1 bv2 bv3 i
+  IFS=. read -r av0 av1 av2 av3 <<<"$a_clean"
+  IFS=. read -r bv0 bv1 bv2 bv3 <<<"$b_clean"
   av[0]=${av0:-0}; av[1]=${av1:-0}; av[2]=${av2:-0}; av[3]=${av3:-0}
   bv[0]=${bv0:-0}; bv[1]=${bv1:-0}; bv[2]=${bv2:-0}; bv[3]=${bv3:-0}
   for i in 0 1 2 3; do
@@ -452,6 +471,7 @@ update_zoo_cmd() {
       if [[ -z "$embed_url" ]]; then embed_url="${installed_repo_url:-}"; fi
       rendered=$(mktemp)
       if render_meta_cli "$source_dir" "$rendered" "$src_version" "$embed_url"; then
+        chmod +x "$rendered" 2>/dev/null || true
         if [[ $allow_update -eq 0 ]]; then
           line_prefix="[up-to-date]"; [[ $dry_run -eq 1 ]] && line_prefix="[would-up-to-date]"
           echo "$line_prefix bash-zoo (repo gate: $reason)"

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # passage: Interactive GNU Pass browser with pins + MRU
-# UX: Simple text menu (no fzf); no nested preview; no TOTP.
-# Requires: pass and a clipboard tool (pbcopy/wl-copy/xclip/xsel).
+# UX: Simple text menu (no fzf); no nested preview; built‑in TOTP (MFA) helpers.
+# Requires: pass and a clipboard tool (pbcopy/wl-copy/xclip/xsel). For TOTP, `oathtool`.
 
 PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
 
@@ -11,6 +11,9 @@ PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
 STATE_DIR_DEFAULT="$HOME/.local/state"
 STATE_DIR="${XDG_STATE_HOME:-$STATE_DIR_DEFAULT}/bash-zoo/passage"
 STATE_FILE="$STATE_DIR/state.tsv"
+
+# TOTP window (seconds)
+TOTP_WINDOW=30
 
 # Colors
 BOLD=""; DIM=""; FG_BLUE=""; FG_GREEN=""; FG_YELLOW=""; FG_MAGENTA=""; FG_RED=""; FG_CYAN=""; FG_WHITE=""; RESET=""
@@ -219,6 +222,91 @@ reveal_until_clear() {
   if command -v tput >/dev/null 2>&1; then tput clear; else printf '\033[2J\033[H'; fi
 }
 
+# Determine whether a given pass entry has an MFA secret.
+# Rules:
+# - If the entry itself ends with '/mfa' (or is exactly 'mfa'), it is an MFA entry.
+# - Otherwise, if a sibling entry '<path>/mfa' exists in the store, treat it as MFA-enabled.
+has_mfa_for_path() {
+  local path="$1"
+  if [[ "$path" == */mfa || "$path" == mfa ]]; then
+    return 0
+  fi
+  local sibling="$path/mfa"
+  local i
+  for i in "${!full_paths[@]}"; do
+    if [[ "${full_paths[$i]}" == "$sibling" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Given a pass entry, return the concrete MFA entry path (echo) or empty if none.
+mfa_target_for_path() {
+  local path="$1"
+  if [[ "$path" == */mfa || "$path" == mfa ]]; then
+    printf '%s' "$path"
+    return 0
+  fi
+  local sibling="$path/mfa"
+  local i
+  for i in "${!full_paths[@]}"; do
+    if [[ "${full_paths[$i]}" == "$sibling" ]]; then
+      printf '%s' "$sibling"
+      return 0
+    fi
+  done
+  printf ''
+  return 1
+}
+
+# Utility from mfa: format 6 digits as '123 456'
+format_otp() {
+  local digits="$1"; local len=${#digits}; local chunk=3; local idx=0; local result=""; local part
+  while (( idx < len )); do
+    part="${digits:idx:chunk}"
+    [[ -n "$result" ]] && result+=" "
+    result+="$part"
+    idx=$((idx + chunk))
+  done
+  printf '%s' "$result"
+}
+
+# Single-line progress visualization similar to mfa
+render_progress() {
+  local remaining="$1" step="$2" width=24 elapsed filled empty filled_bar empty_bar color
+  elapsed=$((step - remaining))
+  (( elapsed < 0 )) && elapsed=0
+  (( elapsed > step )) && elapsed=$step
+  filled=$((elapsed * width / step))
+  empty=$((width - filled))
+  [[ $filled -gt 0 ]] && filled_bar="$(printf '%*s' "$filled" '' | tr ' ' '=')" || filled_bar=""
+  [[ $empty  -gt 0 ]] && empty_bar="$(printf '%*s' "$empty" ''  | tr ' ' '.')" || empty_bar=""
+  color="$FG_GREEN"
+  (( remaining <= 5 )) && color="$FG_RED"
+  (( remaining > 5 && remaining <= 10 )) && color="$FG_YELLOW"
+  printf '%s[%s%s%s%s]%s %s%2ds remaining%s\n' \
+    "$DIM" "$FG_CYAN" "$filled_bar" "$DIM" "$empty_bar" "$RESET" "$color" "$remaining" "$RESET"
+}
+
+# Generate an OTP from a pass entry while avoiding secret exposure in argv.
+# Exactly one non-empty line allowed (base32 secret); otpauth:// URIs are rejected.
+mfa_generate_otp_from_pass() {
+  local entry="$1" content first rest secret code
+  if ! content="$(pass show -- "$entry")"; then return 1; fi
+  first="${content%%$'\n'*}"
+  if [[ "$content" == *$'\n'* ]]; then rest="${content#*$'\n'}"; else rest=""; fi
+  if [[ -n "${rest//[[:space:]]/}" ]]; then die "MFA entry must contain exactly one line (base32 secret)."; fi
+  secret="${first//[[:space:]]/}"
+  [[ -z "$secret" ]] && die "MFA secret is empty. Ensure one non-empty line."
+  [[ "$secret" == otpauth://* ]] && die "otpauth URIs are not supported. Store the base32 secret only (one line)."
+  if ! code="$(printf '%s' "$secret" | oathtool --totp -b - 2>/dev/null)"; then
+    die "oathtool failed to generate a code."
+  fi
+  unset -v content first rest secret || true
+  printf '%s' "$code"
+}
+
 require_deps() { command -v pass >/dev/null 2>&1 || die "Missing dependency: pass"; }
 
 # Full cached listing arrays
@@ -282,10 +370,11 @@ term_cols() {
 
 # Visible label without ANSI color for width calculations
 visible_label_for_index() {
-  local idx="$1" l star_txt=""
+  local idx="$1" l star_txt="" mfa_tag=""
   l="$(format_label "${list_paths[$idx]}")"
   [[ "${list_pins[$idx]}" == "1" ]] && star_txt='★ '
-  printf '%s%s' "$star_txt" "$l"
+  if has_mfa_for_path "${list_paths[$idx]}"; then mfa_tag=' [mfa]'; fi
+  printf '%s%s%s' "$star_txt" "$l" "$mfa_tag"
 }
 
 # Colored label for display
@@ -299,7 +388,7 @@ truncate_text() {
 }
 
 colored_label_for_index() {
-  local idx="$1" w="${2-}" l star_colored="" out pre last
+  local idx="$1" w="${2-}" l star_colored="" out pre last mfa_colored=""
   l="$(format_label "${list_paths[$idx]}")"
   if [[ -n "$w" ]]; then
     if [[ "${list_pins[$idx]}" == "1" ]]; then
@@ -310,18 +399,21 @@ colored_label_for_index() {
       # Split visible text at the last separator to color the tail differently
       last="${out##* | }"
       pre="${out%${last}}"
-      printf '%s%s%s%s%s%s' "$star_colored" "$FG_BLUE" "$pre" "$FG_WHITE" "$last" "$RESET"
+      if has_mfa_for_path "${list_paths[$idx]}"; then mfa_colored=" ${DIM}[mfa]${RESET}"; fi
+      printf '%s%s%s%s%s%s%s' "$star_colored" "$FG_BLUE" "$pre" "$FG_WHITE" "$last" "$RESET" "$mfa_colored"
     else
       out="$(truncate_text "$l" "$w")"
       last="${out##* | }"
       pre="${out%${last}}"
-      printf '%s%s%s%s%s' "$FG_BLUE" "$pre" "$FG_WHITE" "$last" "$RESET"
+      if has_mfa_for_path "${list_paths[$idx]}"; then mfa_colored=" ${DIM}[mfa]${RESET}"; fi
+      printf '%s%s%s%s%s%s' "$FG_BLUE" "$pre" "$FG_WHITE" "$last" "$RESET" "$mfa_colored"
     fi
   else
     [[ "${list_pins[$idx]}" == "1" ]] && star_colored="${FG_YELLOW}★ ${RESET}"
     last="${l##* | }"
     pre="${l%${last}}"
-    printf '%s%s%s%s%s%s' "$star_colored" "$FG_BLUE" "$pre" "$FG_WHITE" "$last" "$RESET"
+    if has_mfa_for_path "${list_paths[$idx]}"; then mfa_colored=" ${DIM}[mfa]${RESET}"; fi
+    printf '%s%s%s%s%s%s%s' "$star_colored" "$FG_BLUE" "$pre" "$FG_WHITE" "$last" "$RESET" "$mfa_colored"
   fi
 }
 
@@ -440,6 +532,40 @@ perform_reveal() {
   reveal_until_clear "$(format_label "$path")" "$p"
 }
 
+perform_totp_copy() {
+  local path="$1" target otp pretty tool
+  target="$(mfa_target_for_path "$path")"
+  if [[ -z "$target" ]]; then msg_warn "No MFA entry found for '$path'."; return 0; fi
+  command -v oathtool >/dev/null 2>&1 || die "Missing dependency: oathtool"
+  if ! otp="$(mfa_generate_otp_from_pass "$target")"; then die "Failed to generate OTP for '$target'."; fi
+  pretty="$(format_otp "$otp")"
+  if clipboard_copy "$otp"; then tool="$CLIPBOARD_TOOL_LAST"; else tool=""; fi
+  state_touch "$path"; state_save
+  if [[ -n "$tool" ]]; then msg_ok "TOTP copied to clipboard ($tool)."; else msg_warn "No clipboard tool found."; fi
+}
+
+perform_totp_reveal() {
+  local path="$1" target otp pretty now modulo remaining
+  target="$(mfa_target_for_path "$path")"
+  if [[ -z "$target" ]]; then msg_warn "No MFA entry found for '$path'."; return 0; fi
+  command -v oathtool >/dev/null 2>&1 || die "Missing dependency: oathtool"
+  if ! otp="$(mfa_generate_otp_from_pass "$target")"; then die "Failed to generate OTP for '$target'."; fi
+  pretty="$(format_otp "$otp")"
+  # Copy as a convenience, like reveal password
+  if clipboard_copy "$otp"; then :; else :; fi
+  now=$(date +%s)
+  modulo=$((now % TOTP_WINDOW))
+  remaining=$((TOTP_WINDOW - modulo))
+  (( remaining == 0 )) && remaining=$TOTP_WINDOW
+  if command -v tput >/dev/null 2>&1; then tput clear; else printf '\033[2J\033[H'; fi
+  printf '%s%sReveal TOTP:%s %s\n\n' "$BOLD" "$FG_MAGENTA" "$RESET" "$(format_label "$path")"
+  printf '%s%s%s\n\n' "$BOLD" "$FG_CYAN" "$pretty" "$RESET"
+  render_progress "$remaining" "$TOTP_WINDOW"
+  printf '\n%sPress Enter to clear...%s\n' "$DIM" "$RESET"
+  read -r -s _
+  if command -v tput >/dev/null 2>&1; then tput clear; else printf '\033[2J\033[H'; fi
+}
+
 clear_clipboard() {
   local tool
   if clipboard_copy ""; then
@@ -473,12 +599,14 @@ actions_menu_for() {
   printf '%sEntry:%s %s\n' "$BOLD$FG_MAGENTA" "$RESET" "$display"
   printf '%sPath:%s  %s\n' "$DIM" "$RESET" "$path"
   printf '%sPinned:%s %s   %sLast Used:%s %s\n' "$DIM" "$RESET" "$pin" "$DIM" "$RESET" "$used_h"
-  printf '\n%sActions:%s [c]opy  [r]eveal  [p]in/unpin  [x] clear-clipboard  [o]ptions  [b]ack  [q]uit\n' "$BOLD" "$RESET"
+  printf '\n%sActions:%s [c]opy  [r]eveal  [t]otp-copy  [T]otp-reveal  [p]in/unpin  [x] clear-clipboard  [o]ptions  [b]ack  [q]uit\n' "$BOLD" "$RESET"
   printf 'Select: '
   local act; read -r act || return 0
   case "$act" in
     c|'') perform_copy "$path" ;;
     r) perform_reveal "$path" ;;
+    t) perform_totp_copy "$path" ;;
+    T) perform_totp_reveal "$path" ;;
     p) state_toggle_pin "$path"; state_save; msg_ok "Pin toggled." ;;
     x) clear_clipboard ;;
     o) options_menu ;;
@@ -487,10 +615,34 @@ actions_menu_for() {
   esac
 }
 
+MFA_ONLY=0
+
+apply_mfa_only_filter() {
+  # Filter current list_* arrays to only entries with MFA available
+  local new_paths=() new_displays=() new_pins=() new_used=()
+  local i p
+  for i in "${!list_paths[@]}"; do
+    p="${list_paths[$i]}"
+    if has_mfa_for_path "$p"; then
+      new_paths+=("$p")
+      new_displays+=("${list_displays[$i]}")
+      new_pins+=("${list_pins[$i]}")
+      new_used+=("${list_used[$i]}")
+    fi
+  done
+  list_paths=("${new_paths[@]}")
+  list_displays=("${new_displays[@]}")
+  list_pins=("${new_pins[@]}")
+  list_used=("${new_used[@]}")
+}
+
 main_loop() {
   local filter=""
   while true; do
     load_listing_arrays "$filter"
+    if (( MFA_ONLY )); then
+      apply_mfa_only_filter
+    fi
     if [[ ${#list_paths[@]} -eq 0 ]]; then
       if [[ -n "$filter" ]]; then
         msg_warn "No entries match filter '$filter'."
@@ -500,8 +652,9 @@ main_loop() {
       die "No pass entries found under '$PASSWORD_STORE_DIR'."
     fi
 
-    printf '%s::%s /term filter | n select | cN/Nc copy | rN/Nr reveal | pN/Np pin | x clear | o options | q quit\n' "$BOLD$FG_CYAN" "$RESET"
+    printf '%s::%s /term filter | n select | cN/Nc copy | rN/Nr reveal | tN/Nt otp-copy | TN/NT otp-reveal | m toggle-mfa-view | pN/Np pin | x clear | o options | q quit\n' "$BOLD$FG_CYAN" "$RESET"
     [[ -n "$filter" ]] && printf '%sFilter:%s %s\n' "$DIM" "$RESET" "$filter"
+    (( MFA_ONLY )) && printf '%sView:%s MFA-only\n' "$DIM" "$RESET"
     print_listing
     printf '\nCommand: '
     local cmd; read -r cmd || { printf '\n'; break; }
@@ -515,6 +668,7 @@ main_loop() {
     case "$cmd" in
       q|quit|exit) printf '%sExiting.%s\n' "$DIM" "$RESET"; break ;;
       o) options_menu ;;
+      m) if (( MFA_ONLY )); then MFA_ONLY=0; else MFA_ONLY=1; fi ;;
       x) clear_clipboard ;;
       /*) filter="${cmd#/}" ;;
       r[0-9]*)
@@ -542,6 +696,34 @@ main_loop() {
         local n="${cmd%c}"
         if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
           perform_copy "${list_paths[$((n-1))]}"
+        else
+          msg_warn "Invalid index: $n"
+        fi ;;
+      t[0-9]*)
+        local n="${cmd#t}"
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
+          perform_totp_copy "${list_paths[$((n-1))]}"
+        else
+          msg_warn "Invalid index: $n"
+        fi ;;
+      [0-9]*t)
+        local n="${cmd%t}"
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
+          perform_totp_copy "${list_paths[$((n-1))]}"
+        else
+          msg_warn "Invalid index: $n"
+        fi ;;
+      T[0-9]*)
+        local n="${cmd#T}"
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
+          perform_totp_reveal "${list_paths[$((n-1))]}"
+        else
+          msg_warn "Invalid index: $n"
+        fi ;;
+      [0-9]*T)
+        local n="${cmd%T}"
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
+          perform_totp_reveal "${list_paths[$((n-1))]}"
         else
           msg_warn "Invalid index: $n"
         fi ;;

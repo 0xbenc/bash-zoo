@@ -147,19 +147,21 @@ Security note: `mfa` never passes your secret as a command argument. It reads th
 
 ### passage
 
-`passage` is an interactive browser for your GNU Pass store. It lists entries with search, supports favorites (pins) and MRU ordering, and uses a simple text menu (no fzf). You can:
+`passage` is an interactive browser for your GNU Pass store. It lists entries with search, supports favorites (pins) and MRU ordering, and uses a simple text menu (no fzf). It also includes built‑in TOTP for entries that store a sibling `mfa` secret. You can:
 
 - Copy the password (first line) directly.
 - Reveal the password on screen until you clear it (also copies to clipboard).
 - Toggle pin on an entry; pinned entries sort first.
 
 Notes
-- Requires `pass` and a clipboard adapter (`pbcopy`, `wl-copy`, `xclip`, or `xsel`).
-- No TOTP (use `mfa` for TOTP codes).
+- Requires `pass` and a clipboard adapter (`pbcopy`, `wl-copy`, `xclip`, or `xsel`). For TOTP actions, install `oathtool`.
+- Built‑in TOTP: entries ending in `/mfa` (or with a sibling `…/mfa`) expose OTP actions. Use `tN`/`Nt` to copy and `TN`/`NT` to reveal the current code. Press `m` to toggle an MFA‑only view.
+- Power users: `mfa` still provides a fuzzy TOTP picker with optional big‑font output.
 - Safe defaults: no secrets printed unless you choose Reveal.
 - Commands:
   - Type a number to select an entry; then choose an action (Enter copies by default).
-  - `cN` or `Nc` copy entry `N`. `rN` or `Nr` reveal entry `N` (also copies). `pN` or `Np` pin/unpin entry `N`.
+  - `cN` or `Nc` copy entry `N`. `rN` or `Nr` reveal entry `N` (also copies). `tN` or `Nt` copy a TOTP for entry `N` when available. `TN` or `NT` reveal a TOTP (also copies). `pN` or `Np` pin/unpin entry `N`.
+  - `m` toggles an MFA‑only view (shows only entries with `/mfa`).
   - `/term` filter list by substring; empty filter shows all again.
   - `O` via Options menu clears pins; `R` via Options menu clears recents.
   - `x` clears clipboard; `o` opens options; `q` quits.
