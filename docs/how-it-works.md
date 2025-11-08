@@ -24,7 +24,7 @@ The goal is to speed up contributions, debugging, and safe automation by conveyi
   - `uninstall [--all]` — remove installed tools/aliases (with interactive selection via `gum` unless `--all`)
   - `update passwords` — per-folder `git` pull under `~/.password-store`
   - `update zoo` — refresh installed tools and the meta CLI (self-update)
-- `scripts/*.sh` — User-facing tools (e.g., `mfa.sh`, `share.sh`, `uuid.sh`, `zapp.sh`, `zapper.sh`, `forgit.sh`, `gpgobble.sh`, `passage.sh`, `astra.sh`).
+- `scripts/*.sh` — User-facing tools (e.g., `mfa.sh`, `uuid.sh`, `zapp.sh`, `zapper.sh`, `forgit.sh`, `gpgobble.sh`, `passage.sh`).
 - `setup/<os>/<tool>.sh` — Per-tool setup helpers for Debian/macOS.
 - `docs/update-zoo.md` — High-level self-update design (kept aligned with the code).
 - `docs/how-it-works.md` — This document.
@@ -81,7 +81,6 @@ High-level flow:
 5) For each selected tool:
    - Try to install a binary into `$(resolve_target_dir)`.
    - If the target dir is not writable, or copy fails: fall back to an alias in the user RC file (`~/.bashrc` or `~/.zshrc`).
-   - Special case: `astra` installs a launcher script pointing first to a share-root runtime, then to the repo fallback, and attempts to find a modern Bash (5+) for best runtime support.
 6) Install the meta CLI unconditionally:
    - Render `scripts/bash-zoo.sh` by substituting `@VERSION@` and `@REPO_URL@` to embed `BASH_ZOO_VERSION` and `BASH_ZOO_REPO_URL`.
 7) Ensure `PATH` contains the target bin directory (append a `# bash-zoo` tagged line in the RC file when needed).
@@ -153,8 +152,7 @@ Concepts:
   - For binaries, update when `cmp -s` indicates content differs.
 - Meta CLI update:
   - Unless `--no-meta`, render the meta CLI with placeholders and compare; update atomically on content difference (subject to gate in regular mode; dev mode always updates when content differs).
-- Astra runtime sync:
-  - If `astra` is installed, replace the share-root runtime directory via double-rename to ensure a consistent swap.
+ 
 - Metadata write:
   - On non-dry runs, write `installed.json` with new `version`, `commit` (unknown in dev mode), `repo_url`, and merged installed list.
 
@@ -196,9 +194,7 @@ for tool in candidates:
   else if gate denies: [up-to-date] (repo gate reason)
   else atomic_install_file -> [updated] or [failed]
 
-# astra runtime
-if astra installed and gate allows:
-  atomic_replace_dir source/astra -> share_root/astra (or would-)
+ 
 
 # meta CLI
 if !--no-meta:
@@ -248,7 +244,7 @@ write_installed_metadata_update(version=src_version, commit, repo_url, names...)
 3) Register the tool in `setup/registry.tsv` with OS allowlist and description.
 4) Update `scripts/bash-zoo.sh` `known_tools()` set.
 5) Update README “Tools at a Glance” and “Tool Details”.
-6) Optional: if the tool has runtime assets, place them in a directory structure designed to live under `$(resolve_share_root)` and adopt the `astra` double-rename strategy for updates.
+6) Optional: if the tool has runtime assets, place them in a directory structure designed to live under `$(resolve_share_root)` and adopt a double-rename strategy for updates.
 7) Verify installation, uninstallation, and update flows:
    - `./install.sh --names <name>`
    - `bash-zoo update zoo --from ./ --dry-run`

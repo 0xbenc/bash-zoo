@@ -313,7 +313,6 @@ play_ascii_once
 # Read registry and build candidate list for this OS
 scripts=()
 scripts_has_deps=()
-install_astra_assets=0
 
 scripts_desc=()
 while IFS=$'\t' read -r name oses has_deps desc; do
@@ -622,9 +621,6 @@ for i in "${!scripts[@]}"; do
                 done
             else
                 selected_scripts+=("$script_name")
-                if [[ "$script_name" == "astra" ]]; then
-                    install_astra_assets=1
-                fi
                 chmod +x "$SCRIPTS_DIR/$script_name.sh"
                 if [[ "${scripts_has_deps[i]}" == "yes" ]]; then
                     run_setup_script "$script_name" "$OS_TYPE" || true
@@ -658,76 +654,7 @@ resolve_share_root() {
     fi
 }
 
-install_astra_runtime() {
-    local share_root dest src
-    share_root=$(resolve_share_root)
-    src="$PWD/astra"
-    dest="$share_root/astra"
-
-    if [[ -z "$share_root" || -z "$dest" ]]; then
-        echo "Error: invalid Astra runtime target" >&2
-        return 1
-    fi
-
-    mkdir -p "$share_root"
-    rm -rf "$dest"
-    mkdir -p "$dest"
-
-    cp -R "$src/bin" "$dest/"
-    cp -R "$src/lib" "$dest/"
-    cp -R "$src/share" "$dest/"
-
-    chmod +x "$dest/bin/astra" 2>/dev/null || true
-
-    echo "Installed Astra runtime to $dest"
-}
-
-astra_detect_modern_bash() {
-    local candidates=()
-    local candidate
-
-    if [[ -n "${ASTRA_PREFERRED_BASH:-}" ]]; then
-        candidates+=("$ASTRA_PREFERRED_BASH")
-    fi
-
-    if command -v brew >/dev/null 2>&1; then
-        if candidate=$(brew --prefix bash 2>/dev/null); then
-            if [[ -n "$candidate" && -x "$candidate/bin/bash" ]]; then
-                candidates+=("$candidate/bin/bash")
-            fi
-        fi
-    fi
-
-    if [[ -x "/opt/homebrew/bin/bash" ]]; then
-        candidates+=("/opt/homebrew/bin/bash")
-    fi
-
-    if [[ -x "/usr/local/bin/bash" ]]; then
-        candidates+=("/usr/local/bin/bash")
-    fi
-
-    if command -v bash >/dev/null 2>&1; then
-        candidate=$(command -v bash)
-        if [[ -n "$candidate" ]]; then
-            candidates+=("$candidate")
-        fi
-    fi
-
-    for candidate in "${candidates[@]}"; do
-        if [[ -x "$candidate" ]]; then
-            if "$candidate" -c '(( BASH_VERSINFO[0] >= 5 ))' >/dev/null 2>&1; then
-                printf '%s\n' "$candidate"
-                return 0
-            fi
-        fi
-    done
-
-    return 1
-}
-
-if [[ $install_astra_assets -eq 1 ]]; then
-    install_astra_runtime || true
-fi
+ 
 
 ensure_dir() {
     local dir="$1"
@@ -840,114 +767,7 @@ write_installed_metadata() {
     echo "Wrote metadata: $meta_file"
 }
 
-install_astra_launcher() {
-    local dst_dir="$1"
-    local dst="$dst_dir/astra"
-    local share_root repo_script runtime_root runtime_bin
-    local preferred_bash=""
-
-    share_root=$(resolve_share_root)
-    runtime_root="$share_root/astra"
-    runtime_bin="$runtime_root/bin/astra"
-    repo_script="$PWD/$SCRIPTS_DIR/astra.sh"
-
-    if preferred_bash=$(astra_detect_modern_bash 2>/dev/null); then
-        :
-    else
-        preferred_bash=""
-    fi
-
-    local escaped_repo escaped_runtime escaped_preferred
-    escaped_repo=$(printf '%q' "$repo_script")
-    escaped_runtime=$(printf '%q' "$runtime_bin")
-    escaped_preferred=$(printf '%q' "$preferred_bash")
-
-    cat > "$dst" <<EOF
-#!/bin/bash
-set -euo pipefail
-
-ASTRA_RUNTIME=$escaped_runtime
-ASTRA_FALLBACK=$escaped_repo
-ASTRA_PREFERRED_BASH=$escaped_preferred
-
-if [[ -n "\$ASTRA_PREFERRED_BASH" ]]; then
-  export ASTRA_PREFERRED_BASH
-fi
-
-astra_find_modern_bash() {
-  local candidates=()
-  local candidate
-
-  if [[ -n "\$ASTRA_PREFERRED_BASH" ]]; then
-    candidates+=("\$ASTRA_PREFERRED_BASH")
-  fi
-
-  if [[ -x "/opt/homebrew/bin/bash" ]]; then
-    candidates+=("/opt/homebrew/bin/bash")
-  fi
-
-  if [[ -x "/usr/local/bin/bash" ]]; then
-    candidates+=("/usr/local/bin/bash")
-  fi
-
-  if command -v brew >/dev/null 2>&1; then
-    candidate="\$(brew --prefix bash 2>/dev/null)"
-    if [[ -n "\$candidate" && -x "\$candidate/bin/bash" ]]; then
-      candidates+=("\$candidate/bin/bash")
-    fi
-  fi
-
-  if command -v bash >/dev/null 2>&1; then
-    candidate="\$(command -v bash)"
-    if [[ -n "\$candidate" ]]; then
-      candidates+=("\$candidate")
-    fi
-  fi
-
-  local item
-  for item in "\${candidates[@]}"; do
-    if [[ -x "\$item" ]]; then
-      if "\$item" -c '(( BASH_VERSINFO[0] >= 5 ))' >/dev/null 2>&1; then
-        printf '%s\n' "\$item"
-        return 0
-      fi
-    fi
-  done
-
-  return 1
-}
-
-astra_launch() {
-  local script="\$1"
-  shift
-
-  if [[ ! -x "\$script" ]]; then
-    return 1
-  fi
-
-  local modern_bash
-  if modern_bash="\$(astra_find_modern_bash)"; then
-    exec "\$modern_bash" "\$script" "\$@"
-  fi
-
-  exec "\$script" "\$@"
-}
-
-if [[ -x "\$ASTRA_RUNTIME" ]]; then
-  astra_launch "\$ASTRA_RUNTIME" "\$@"
-fi
-
-if [[ -x "\$ASTRA_FALLBACK" ]]; then
-  astra_launch "\$ASTRA_FALLBACK" "\$@"
-fi
-
-cat >&2 <<'ERR'
-astra: runtime not found. Re-run ./install.sh (select astra) after pulling latest assets.
-ERR
-exit 1
-EOF
-    chmod +x "$dst" 2>/dev/null || true
-}
+ 
 
 # Perform installation: prefer bin dir, fallback to aliases per-script
 USER_SHELL=$(basename "${SHELL:-}")
@@ -969,17 +789,6 @@ installed_as_alias=()
     if ensure_dir "$target_dir" && is_writable_dir "$target_dir"; then
         # Install selected tools (if any)
         for script in "${selected_scripts[@]:-}"; do
-        if [[ "$script" == "astra" ]]; then
-            if install_astra_launcher "$target_dir"; then
-                installed_to_bin+=("$script")
-            else
-                src="$PWD/$SCRIPTS_DIR/$script.sh"
-                add_or_update_alias "$script" "$src" "$RC_FILE"
-                installed_as_alias+=("$script")
-            fi
-            continue
-        fi
-
         src="$PWD/$SCRIPTS_DIR/$script.sh"
         if install_file "$src" "$target_dir" "$script"; then
             installed_to_bin+=("$script")

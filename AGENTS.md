@@ -3,7 +3,7 @@
 > Agents: before making non-trivial changes, read `docs/how-it-works.md` for an architecture and workflow overview (install, uninstall, self-update, metadata, portability, atomicity). Treat it as required onboarding.
 
 ## Project Structure & Modules
-- `scripts/`: User-facing tools (`mfa.sh`, `share.sh`, `uuid.sh`, `zapper.sh`, `zapp.sh`).
+- `scripts/`: User-facing tools (`mfa.sh`, `uuid.sh`, `zapper.sh`, `zapp.sh`).
 - `setup/`: Per-OS setup scripts named after each script.
   - `setup/debian/*.sh` (apt-based)
   - `setup/macos/*.sh` (Homebrew)

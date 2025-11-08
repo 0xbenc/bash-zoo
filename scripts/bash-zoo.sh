@@ -383,10 +383,6 @@ update_zoo_cmd() {
   # Update tools (bins only). Skip alias-only installs.
   local name src_tool bin_path line_prefix
   for name in "${names[@]:-}"; do
-    # Special-case astra: runtime assets handled later; skip bin here
-    if [[ "$name" == "astra" ]]; then
-      continue
-    fi
     if tool_is_alias_only "$name"; then
       line_prefix="[skipped-alias]"
       if [[ $dry_run -eq 1 ]]; then line_prefix="[would-skipped-alias]"; fi
@@ -434,33 +430,7 @@ update_zoo_cmd() {
     fi
   done
 
-  # Astra runtime sync if astra is installed
-  local have_astra=0 asrc="" share_root runtime_target
-  for m in "${names[@]:-}"; do if [[ "$m" == "astra" ]]; then have_astra=1; break; fi; done
-  if [[ $have_astra -eq 1 ]]; then
-    asrc="$source_dir/astra"
-    if [[ -d "$asrc" ]]; then
-      share_root=$(resolve_share_root)
-      runtime_target="$share_root/astra"
-      if [[ $allow_update -eq 0 ]]; then
-        line_prefix="[up-to-date]"; [[ $dry_run -eq 1 ]] && line_prefix="[would-up-to-date]"
-        echo "$line_prefix astra-runtime (repo gate: $reason)"
-        ((uptodate+=1))
-      else
-        if [[ $dry_run -eq 1 ]]; then
-          echo "[would-updated] astra-runtime"
-          ((updated+=1))
-        else
-          if atomic_replace_dir "$asrc" "$runtime_target"; then
-            echo "[updated] astra-runtime"
-            ((updated+=1))
-          else
-            echo "[failed]  astra-runtime (replace error)"; ((failed+=1))
-          fi
-        fi
-      fi
-    fi
-  fi
+  # (runtime assets sync removed)
 
   # Meta CLI update (unless --no-meta)
   if [[ $no_meta -ne 1 ]]; then
@@ -580,13 +550,10 @@ ensure_gum() {
 known_tools() {
   # Keep in sync with scripts/*.sh (not including this file)
   printf '%s\n' \
-    airplane \
-    astra \
     forgit \
     gpgobble \
     mfa \
     passage \
-    share \
     uuid \
     zapp \
     zapper
