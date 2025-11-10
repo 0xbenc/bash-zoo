@@ -654,28 +654,30 @@ discover_installed_tools() {
 }
 
 print_version() {
+  local label=""
   # Prefer dev labels embedded into the script (e.g., "Local - ...").
   if [[ "${BASH_ZOO_VERSION:-}" == Local\ -\ * ]]; then
-    printf '%s\n' "$BASH_ZOO_VERSION"
-    return 0
-  fi
-  # Otherwise prefer installed metadata commit; fall back to repo commit if running from source; else unknown.
-  local commit="unknown" short="unknown"
-  read_installed_metadata
-  if [[ -n "${INST_COMMIT:-}" && "${INST_COMMIT:-}" != "unknown" ]]; then
-    commit="$INST_COMMIT"
+    label="$BASH_ZOO_VERSION"
   else
-    # Try to derive from the script location if it's inside a git repo (dev use)
-    local self_dir
-    self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)
-    if [[ -n "$self_dir" ]] && git -C "$self_dir" rev-parse --git-dir >/dev/null 2>&1; then
-      commit=$(git -C "$self_dir" rev-parse --verify HEAD 2>/dev/null || echo "unknown")
+    # Otherwise prefer installed metadata commit; fall back to repo commit if running from source; else unknown.
+    local commit="unknown" short="unknown"
+    read_installed_metadata
+    if [[ -n "${INST_COMMIT:-}" && "${INST_COMMIT:-}" != "unknown" ]]; then
+      commit="$INST_COMMIT"
+    else
+      # Try to derive from the script location if it's inside a git repo (dev use)
+      local self_dir
+      self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)
+      if [[ -n "$self_dir" ]] && git -C "$self_dir" rev-parse --git-dir >/dev/null 2>&1; then
+        commit=$(git -C "$self_dir" rev-parse --verify HEAD 2>/dev/null || echo "unknown")
+      fi
     fi
+    if [[ "$commit" != "unknown" ]]; then
+      short="${commit:0:7}"
+    fi
+    label="$short"
   fi
-  if [[ "$commit" != "unknown" ]]; then
-    short="${commit:0:7}"
-  fi
-  printf '%s\n' "$short"
+  printf 'version: %s\n' "${label:-unknown}"
 }
 
 uninstall_cmd() {

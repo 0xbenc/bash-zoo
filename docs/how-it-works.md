@@ -20,7 +20,7 @@ The goal is to speed up contributions, debugging, and safe automation by conveyi
 
 - `install.sh` — Interactive installer and alias configurator. Detects OS, provisions binaries or aliases, embeds version/repo URL into the meta CLI (falling back to the canonical URL when no git remote is found), and writes `installed.json`.
 - `scripts/bash-zoo.sh` — Meta CLI that provides:
-  - `version` — prints the short commit hash (or `unknown`)
+  - `version` — prints `version: <label>` where `<label>` is the short commit hash or a dev label (e.g., `Local - Uncommitted`, `Local - <hash> (pushed)`).
   - `uninstall [--all]` — remove installed tools/aliases (with interactive selection via `gum` unless `--all`)
   - `update passwords` — per-folder `git` pull under `~/.password-store`
   - `update zoo` — refresh installed tools and the meta CLI (self-update)
