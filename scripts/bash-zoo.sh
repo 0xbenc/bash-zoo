@@ -6,6 +6,9 @@ set -euo pipefail
 # - Always installed into user bin by install.sh
 # - Portable: avoids Bash 4-only features
 
+# Canonical default repo URL used as a fallback when embedded/metadata are absent
+DEFAULT_REPO_URL="https://github.com/0xbenc/bash-zoo.git"
+
 # Version is embedded at install time by install.sh
 BASH_ZOO_VERSION="@VERSION@"
 # Default repository URL embedded at install time (may be empty when unknown)
@@ -32,6 +35,12 @@ EOF
 }
 
 echo_err() { printf '%s\n' "$*" >&2; }
+
+# Detect if a value is an unresolved placeholder
+is_placeholder() {
+  local v="${1-}"
+  [[ "$v" == "@VERSION@" || "$v" == "@REPO_URL@" ]]
+}
 
 resolve_os_type() {
   local u
@@ -239,6 +248,13 @@ render_meta_cli() {
   if [[ ! -f "$src" ]]; then
     return 1
   fi
+  # Sanitize placeholders/empties
+  if is_placeholder "$version" || [[ -z "${version:-}" ]]; then
+    version="${version:-}"
+  fi
+  if is_placeholder "$repo_url" || [[ -z "${repo_url:-}" ]]; then
+    repo_url="$DEFAULT_REPO_URL"
+  fi
   # Use sed without in-place to keep portability
   if sed --version >/dev/null 2>&1; then
     sed -e "s/@VERSION@/${version//\//\/}/g" \
@@ -275,26 +291,39 @@ update_zoo_cmd() {
   # Determine source
   local mode="clone" source_dir tmp_dir
   if [[ -n "$from_path" ]]; then
-    mode="dev"
-    # Validate contents
-    if [[ ! -d "$from_path/scripts" || ! -f "$from_path/VERSION" ]]; then
-      echo_err "--from path must contain 'scripts/' and 'VERSION'"
-      return 1
+    # If --from is a local directory, use dev mode.
+    if [[ -d "$from_path" ]]; then
+      mode="dev"
+      if [[ ! -d "$from_path/scripts" || ! -f "$from_path/VERSION" ]]; then
+        echo_err "--from path must contain 'scripts/' and 'VERSION'"
+        return 1
+      fi
+      source_dir="$from_path"
+    else
+      # If --from looks like a git URL, treat like clone mode and use it as repo_url.
+      case "$from_path" in
+        http://*|https://*|ssh://*|git@*|*.git)
+          mode="clone"; repo_url="$from_path" ;;
+        *)
+          echo_err "--from must be a directory or a git URL"
+          return 1 ;;
+      esac
     fi
-    source_dir="$from_path"
   else
     # Determine repo URL precedence: flag -> env -> embedded
     if [[ -z "$repo_url" ]]; then
       if [[ -n "${BASH_ZOO_REPO_URL:-}" ]]; then
-        repo_url="$BASH_ZOO_REPO_URL"
+        if ! is_placeholder "$BASH_ZOO_REPO_URL"; then
+          repo_url="$BASH_ZOO_REPO_URL"
+        fi
       fi
     fi
     if [[ -z "$repo_url" && -n "${INST_REPO_URL:-}" ]]; then
       repo_url="$INST_REPO_URL"
     fi
+    # Final fallback to default repo URL
     if [[ -z "$repo_url" ]]; then
-      echo_err "No repo URL available. Provide --repo or set BASH_ZOO_REPO_URL."
-      return 1
+      repo_url="$DEFAULT_REPO_URL"
     fi
     if ! command -v git >/dev/null 2>&1; then
       echo_err "git is required for cloning updates"
@@ -324,10 +353,49 @@ update_zoo_cmd() {
   else
     src_version="0.0.0"
   fi
-  if [[ "$mode" == "clone" ]]; then
+  if git -C "$source_dir" rev-parse --git-dir >/dev/null 2>&1; then
     src_commit=$(git -C "$source_dir" rev-parse --verify HEAD 2>/dev/null || echo "unknown")
   else
     src_commit="unknown"
+  fi
+
+  # Version to embed in the meta CLI (dev mode gets a nuanced label)
+  local embed_version="$src_version"
+  if [[ "$mode" == "dev" ]]; then
+    if git -C "$source_dir" rev-parse --git-dir >/dev/null 2>&1; then
+      # If there are uncommitted changes, prefer that signal
+      local _st
+      _st=$(git -C "$source_dir" status --porcelain 2>/dev/null || echo "")
+      if [[ -n "${_st:-}" ]]; then
+        embed_version="Local - Uncommitted"
+      else
+        # Determine relationship to upstream to refine the label
+        local up_ref lr_counts left right _short
+        _short=$(git -C "$source_dir" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        up_ref=$(git -C "$source_dir" rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo "")
+        if [[ -z "$up_ref" ]]; then
+          embed_version="Local - ${_short:-unknown} (no upstream)"
+        else
+          lr_counts=$(git -C "$source_dir" rev-list --left-right --count "HEAD...$up_ref" 2>/dev/null || echo "")
+          if [[ -z "$lr_counts" ]]; then
+            embed_version="Local - ${_short:-unknown} (unknown)"
+          else
+            left=0; right=0
+            IFS=$' \t' read -r left right <<<"$lr_counts"
+            # left: commits ahead of upstream; right: commits behind upstream
+            if [[ "$left" == "0" ]]; then
+              embed_version="Local - ${_short:-unknown} (pushed)"
+            elif [[ "$right" == "0" ]]; then
+              embed_version="Local - ${_short:-unknown} (unpushed)"
+            else
+              embed_version="Local - ${_short:-unknown} (diverged)"
+            fi
+          fi
+        fi
+      fi
+    else
+      embed_version="Local - unknown"
+    fi
   fi
 
   # Gate update (regular mode only, unless --force)
@@ -437,10 +505,11 @@ update_zoo_cmd() {
     local meta_path="" rendered="" embed_url=""
     if meta_path=$(find_meta_cli_path); then
       embed_url="$repo_url"
-      if [[ -z "$embed_url" ]]; then embed_url="${BASH_ZOO_REPO_URL:-}"; fi
-      if [[ -z "$embed_url" ]]; then embed_url="${installed_repo_url:-}"; fi
+      if [[ -z "$embed_url" ]] || is_placeholder "$embed_url"; then embed_url="${BASH_ZOO_REPO_URL:-}"; fi
+      if [[ -z "$embed_url" ]] || is_placeholder "$embed_url"; then embed_url="${installed_repo_url:-}"; fi
+      if [[ -z "$embed_url" ]] || is_placeholder "$embed_url"; then embed_url="$DEFAULT_REPO_URL"; fi
       rendered=$(mktemp)
-      if render_meta_cli "$source_dir" "$rendered" "$src_version" "$embed_url"; then
+      if render_meta_cli "$source_dir" "$rendered" "$embed_version" "$embed_url"; then
         chmod +x "$rendered" 2>/dev/null || true
         if [[ $allow_update -eq 0 ]]; then
           line_prefix="[up-to-date]"; [[ $dry_run -eq 1 ]] && line_prefix="[would-up-to-date]"
@@ -585,7 +654,28 @@ discover_installed_tools() {
 }
 
 print_version() {
-  printf '%s\n' "$BASH_ZOO_VERSION"
+  # Prefer dev labels embedded into the script (e.g., "Local - ...").
+  if [[ "${BASH_ZOO_VERSION:-}" == Local\ -\ * ]]; then
+    printf '%s\n' "$BASH_ZOO_VERSION"
+    return 0
+  fi
+  # Otherwise prefer installed metadata commit; fall back to repo commit if running from source; else unknown.
+  local commit="unknown" short="unknown"
+  read_installed_metadata
+  if [[ -n "${INST_COMMIT:-}" && "${INST_COMMIT:-}" != "unknown" ]]; then
+    commit="$INST_COMMIT"
+  else
+    # Try to derive from the script location if it's inside a git repo (dev use)
+    local self_dir
+    self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)
+    if [[ -n "$self_dir" ]] && git -C "$self_dir" rev-parse --git-dir >/dev/null 2>&1; then
+      commit=$(git -C "$self_dir" rev-parse --verify HEAD 2>/dev/null || echo "unknown")
+    fi
+  fi
+  if [[ "$commit" != "unknown" ]]; then
+    short="${commit:0:7}"
+  fi
+  printf '%s\n' "$short"
 }
 
 uninstall_cmd() {
