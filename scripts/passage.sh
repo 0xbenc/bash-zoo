@@ -38,6 +38,15 @@ fi
 
 die() { printf '%s%sError:%s %s\n' "$FG_RED" "$BOLD" "$RESET" "$1" >&2; exit 1; }
 
+# Ensure gpg pinentry can attach to this terminal session on first decrypt.
+# This prevents silent failures when gpg-agent needs to prompt but has no TTY.
+if [[ -t 0 ]]; then
+  export GPG_TTY="$(tty)"
+  if command -v gpg-connect-agent >/dev/null 2>&1; then
+    gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1 || true
+  fi
+fi
+
 # Portable date rendering for epoch -> human local time
 epoch_to_hms() {
   local epoch="$1"
