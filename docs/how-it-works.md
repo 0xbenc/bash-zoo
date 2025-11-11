@@ -18,9 +18,9 @@ The goal is to speed up contributions, debugging, and safe automation by conveyi
 
 ## Key Components (Files & Roles)
 
-- `install.sh` — Interactive installer and alias configurator. Detects OS, provisions binaries or aliases, embeds version/repo URL into the meta CLI, and writes `installed.json`.
+- `install.sh` — Interactive installer and alias configurator. Detects OS, provisions binaries or aliases, embeds version/repo URL into the meta CLI (falling back to the canonical URL when no git remote is found), and writes `installed.json`.
 - `scripts/bash-zoo.sh` — Meta CLI that provides:
-  - `version` — prints embedded version
+  - `version` — prints `version: <label>` where `<label>` is the short commit hash or a dev label (e.g., `Local - Uncommitted`, `Local - <hash> (pushed)`).
   - `uninstall [--all]` — remove installed tools/aliases (with interactive selection via `gum` unless `--all`)
   - `update passwords` — per-folder `git` pull under `~/.password-store`
   - `update zoo` — refresh installed tools and the meta CLI (self-update)
@@ -82,7 +82,7 @@ High-level flow:
    - Try to install a binary into `$(resolve_target_dir)`.
    - If the target dir is not writable, or copy fails: fall back to an alias in the user RC file (`~/.bashrc` or `~/.zshrc`).
 6) Install the meta CLI unconditionally:
-   - Render `scripts/bash-zoo.sh` by substituting `@VERSION@` and `@REPO_URL@` to embed `BASH_ZOO_VERSION` and `BASH_ZOO_REPO_URL`.
+   - Render `scripts/bash-zoo.sh` by substituting `@VERSION@` and `@REPO_URL@` to embed `BASH_ZOO_VERSION` and `BASH_ZOO_REPO_URL`. If no git remote is available, embed the canonical default `https://github.com/0xbenc/bash-zoo.git`.
 7) Ensure `PATH` contains the target bin directory (append a `# bash-zoo` tagged line in the RC file when needed).
 8) Write `installed.json` with `version`, `commit`, `repo_url`, and the `installed` union.
 
@@ -132,12 +132,18 @@ Rationale: `pass` stores are commonly git-backed; this command centralizes “mo
 
 ## Self-Update (update zoo)
 
-Command: `bash-zoo update zoo [--from PATH] [--repo URL] [--branch BR] [--dry-run] [--force] [--no-meta]`
+Command: `bash-zoo update zoo [--from PATH|URL] [--repo URL] [--branch BR] [--dry-run] [--force] [--no-meta]`
 
 Concepts:
 - Source resolution:
-  - Dev mode: `--from PATH` uses a local working tree (no git required).
-  - Regular mode: clones a repo (depth 1 by default), with precedence: `--repo` → `BASH_ZOO_REPO_URL` → embedded `BASH_ZOO_REPO_URL` → `installed.json.repo_url`.
+  - Dev mode: `--from PATH` uses a local working tree (no git required). The embedded version label becomes:
+    - `Local - Uncommitted` — working tree has uncommitted changes
+    - `Local - <short-hash> (pushed)` — clean; HEAD is contained in upstream
+    - `Local - <short-hash> (unpushed)` — clean; ahead of upstream only
+    - `Local - <short-hash> (diverged)` — clean; ahead and behind
+    - `Local - <short-hash> (no upstream)` — clean; no upstream configured
+  - URL mode: `--from URL` clones from the provided git URL (treated like regular mode).
+  - Regular mode: clones a repo (depth 1 by default), with precedence: `--repo` → `BASH_ZOO_REPO_URL` → embedded `BASH_ZOO_REPO_URL` → `installed.json.repo_url` → canonical default URL.
   - Branch/ref: `--branch` or default remote HEAD.
 - Forward-only gate (regular mode):
   - Compare `source VERSION` vs `installed.version` as revisions. If greater, allow.
@@ -155,6 +161,9 @@ Concepts:
  
 - Metadata write:
   - On non-dry runs, write `installed.json` with new `version`, `commit` (unknown in dev mode), `repo_url`, and merged installed list.
+
+Additional runtime hardening:
+- If placeholders `@VERSION@`/`@REPO_URL@` are encountered at runtime (e.g., when invoking an unrendered script), the updater treats them as unset and falls back to metadata or the canonical default URL. The `version` command reports the short commit hash when available, otherwise `unknown`.
 
 User-visible output:
 - Per-item lines: `[updated] name`, `[up-to-date] name`, `[skipped] name (reason)`, `[skipped-alias] name`, `[failed] name (reason)`.

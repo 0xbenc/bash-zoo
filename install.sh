@@ -720,6 +720,10 @@ install_bash_zoo() {
     else
         repo_url=""
     fi
+    # Fallback to canonical default when empty
+    if [[ -z "$repo_url" ]]; then
+        repo_url="https://github.com/0xbenc/bash-zoo.git"
+    fi
     mkdir -p "$dst_dir"
     # Embed placeholders @VERSION@ and @REPO_URL@
     if sed --version >/dev/null 2>&1; then
