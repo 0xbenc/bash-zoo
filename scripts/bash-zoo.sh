@@ -603,6 +603,17 @@ ensure_gum() {
       rm -rf "$tmp_dir" 2>/dev/null || true
       find_brew_bin >/dev/null 2>&1
     }
+    install_homebrew_linux_system_prompt() {
+      local tmp_dir installer
+      tmp_dir=$(mktemp -d)
+      installer="$tmp_dir/install-homebrew.sh"
+      if curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$installer"; then
+        chmod +x "$installer" || true
+        /bin/bash "$installer" || true
+      fi
+      rm -rf "$tmp_dir" 2>/dev/null || true
+      find_brew_bin >/dev/null 2>&1
+    }
     install_homebrew_linux_user() {
       local prefix="$HOME/.linuxbrew"
       mkdir -p "$prefix" 2>/dev/null || true
@@ -627,6 +638,12 @@ ensure_gum() {
       fi
     fi
     if ! find_brew_bin >/dev/null 2>&1; then
+      if [[ -t 0 && -t 1 && -z "${BZ_NO_SUDO_PROMPT:-}" ]] && command -v sudo >/dev/null 2>&1; then
+        echo "Installing Homebrew for Linux (system prefix; will prompt for sudo password)..."
+        install_homebrew_linux_system_prompt || true
+      fi
+    fi
+    if ! find_brew_bin >/dev/null 2>&1; then
       echo "Installing Homebrew for Linux (user prefix at ~/.linuxbrew)..."
       install_homebrew_linux_user || true
     fi
@@ -634,7 +651,16 @@ ensure_gum() {
     if brew_bin=$(find_brew_bin); then
       eval "$($brew_bin shellenv)"
       echo "Preparing selector (installing gum via Homebrew for Linux)..."
-      "$brew_bin" list --versions gum >/dev/null 2>&1 || "$brew_bin" install gum >/dev/null 2>&1 || true
+      if ! "$brew_bin" list --versions gum >/dev/null 2>&1; then
+        local bpfx
+        bpfx=$("$brew_bin" --prefix 2>/dev/null || true)
+        if [[ "$bpfx" == "$HOME/.linuxbrew"* ]]; then
+          echo "Installing gum under user-local Homebrew (may build from source; this can take several minutes)."
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 "$brew_bin" install -v gum || true
+        else
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 "$brew_bin" install gum || true
+        fi
+      fi
       command -v gum >/dev/null 2>&1 && return 0
     fi
     return 1

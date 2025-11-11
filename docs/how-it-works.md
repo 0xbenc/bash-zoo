@@ -77,7 +77,7 @@ High-level flow:
 1) Detect OS: macOS vs Debian-like Linux; bail out on unsupported.
 2) Option parsing: `--all`, `--exp`, `--names <csv>` allow non-interactive flows and experimental tool inclusion.
 3) Load registry `setup/registry.tsv` and filter tools by OS (and stability unless `--exp`).
-4) Interactive selection via `gum` (unless `--all` or `--names`). On Linux, the installer ensures Homebrew is available: it uses the official script when non‑interactive sudo is available (system prefix), otherwise performs a user‑local install at `~/.linuxbrew`; then it installs `gum`.
+4) Interactive selection via `gum` (unless `--all` or `--names`). On Linux, the installer ensures Homebrew is available: it uses the official script when sudo works (prefers non‑interactive; with a TTY may prompt once), otherwise performs a user‑local install at `~/.linuxbrew`; then it installs `gum`.
 5) For each selected tool:
    - Try to install a binary into `$(resolve_target_dir)`.
    - If the target dir is not writable, or copy fails: fall back to an alias in the user RC file (`~/.bashrc` or `~/.zshrc`).

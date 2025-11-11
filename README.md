@@ -236,7 +236,7 @@ cd bash-zoo
 - Include experimental tools by adding `--exp` (e.g., `./install.sh --exp`).
 - Skip prompts with `./install.sh --all` (respects `--exp` filtering).
 - Interactive picker also includes an "All" option to select everything.
-- Uses `gum` for the interactive selector. On macOS, the installer uses Homebrew to install `gum` when missing. On Linux (Debian/Ubuntu), the installer ensures Homebrew for Linux is present: it installs to the system prefix when non‑interactive sudo is available, otherwise it performs a user‑local install at `~/.linuxbrew`, then installs `gum`.
+- Uses `gum` for the interactive selector. On macOS, the installer uses Homebrew to install `gum` when missing. On Linux (Debian/Ubuntu), the installer ensures Homebrew for Linux is present: it installs to the system prefix when non‑interactive sudo is available, otherwise it performs a user‑local install at `~/.linuxbrew`, then installs `gum`. On user‑local Linuxbrew, some formulae may build from source; installing `gum` can take several minutes the first time.
   - If a user‑local Linuxbrew is created, the installer evaluates `brew shellenv` for the current run so the UI works immediately. To make `brew` permanent in new shells, add:
     `eval "$(~/.linuxbrew/bin/brew shellenv)"` to your shell rc.
 
