@@ -77,7 +77,7 @@ High-level flow:
 1) Detect OS: macOS vs Debian-like Linux; bail out on unsupported.
 2) Option parsing: `--all`, `--exp`, `--names <csv>` allow non-interactive flows and experimental tool inclusion.
 3) Load registry `setup/registry.tsv` and filter tools by OS (and stability unless `--exp`).
-4) Interactive selection via `gum` (unless `--all` or `--names`). On Linux, Homebrew is bootstrapped if needed to install `gum`.
+4) Interactive selection via `gum` (unless `--all` or `--names`). On Linux, the installer ensures Homebrew is available: it uses the official script when non‑interactive sudo is available (system prefix), otherwise performs a user‑local install at `~/.linuxbrew`; then it installs `gum`.
 5) For each selected tool:
    - Try to install a binary into `$(resolve_target_dir)`.
    - If the target dir is not writable, or copy fails: fall back to an alias in the user RC file (`~/.bashrc` or `~/.zshrc`).
@@ -104,7 +104,7 @@ Command: `bash-zoo uninstall [--all]`
 Flow (scripts/bash-zoo.sh):
 
 1) Build candidate list from known tools and detect presence as binaries and/or aliases in `~/.bashrc` and `~/.zshrc`.
-2) Interactive selection via `gum` unless `--all`. On Linux, Homebrew is bootstrapped if needed for `gum`.
+2) Interactive selection via `gum` unless `--all`. On Linux, the CLI ensures Homebrew exists (system prefix with sudo, or user‑local at `~/.linuxbrew`) and installs `gum` if needed.
 3) Apply removals:
    - Binaries: `rm -f` from the target bin directory.
    - Aliases: remove matching lines from RC files (portable `sed` handling for GNU/BSD).

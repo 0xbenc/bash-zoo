@@ -440,7 +440,7 @@ chmod +x "$PWD/uninstall.sh" 2>/dev/null || true
 # Interactive selection (gum only)
 #############################################
 
-# Ensure gum exists; on Linux, install Homebrew (Linuxbrew) if needed and use it
+# Ensure gum exists; on Linux, ensure Homebrew first with a resilient bootstrap
 ensure_gum() {
   if command -v gum >/dev/null 2>&1; then
     return 0
@@ -452,12 +452,11 @@ ensure_gum() {
       brew list --versions gum >/dev/null 2>&1 || brew install gum >/dev/null 2>&1 || true
       command -v gum >/dev/null 2>&1 && return 0
     fi
-    # As requested, do not attempt other fallbacks; require brew-managed gum
     return 1
   fi
 
   if [[ "$OS_TYPE" == "debian" ]]; then
-    # Helper to find brew path after install
+    # Locate brew if present
     find_brew_bin() {
       if command -v brew >/dev/null 2>&1; then
         command -v brew
@@ -472,26 +471,53 @@ ensure_gum() {
       return 1
     }
 
-    install_homebrew_linux() {
-      if find_brew_bin >/dev/null 2>&1; then
-        return 0
-      fi
-      echo "Installing Homebrew for Linux (non-interactive)..."
+    can_sudo_noninteractive() {
+      if ! command -v sudo >/dev/null 2>&1; then return 1; fi
+      sudo -n true >/dev/null 2>&1
+    }
+
+    install_homebrew_linux_system() {
+      # Install to /home/linuxbrew via official script if non-interactive sudo works
       local tmp_dir installer
       tmp_dir=$(mktemp -d)
       installer="$tmp_dir/install-homebrew.sh"
-      # Best-effort fetch; honors set -e but we guard with || return 1 to keep clear error path
       if curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$installer"; then
         chmod +x "$installer" || true
-        NONINTERACTIVE=1 /bin/bash "$installer"
+        NONINTERACTIVE=1 /bin/bash "$installer" || true
       fi
       rm -rf "$tmp_dir" 2>/dev/null || true
       find_brew_bin >/dev/null 2>&1
     }
 
-    # Install brew if not present
+    install_homebrew_linux_user() {
+      # User-local (unsupported) install to ~/.linuxbrew — no sudo required
+      local prefix="$HOME/.linuxbrew"
+      mkdir -p "$prefix" 2>/dev/null || true
+      if [[ ! -x "$prefix/bin/brew" ]]; then
+        if command -v git >/dev/null 2>&1; then
+          if [[ ! -d "$prefix/Homebrew/.git" ]]; then
+            git clone --depth=1 https://github.com/Homebrew/brew "$prefix/Homebrew" >/dev/null 2>&1 || true
+          fi
+        elif command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1; then
+          mkdir -p "$prefix/Homebrew" 2>/dev/null || true
+          curl -fsSL https://github.com/Homebrew/brew/tarball/HEAD | tar -xz -C "$prefix/Homebrew" --strip-components=1 >/dev/null 2>&1 || true
+        fi
+        mkdir -p "$prefix/bin" 2>/dev/null || true
+        ln -sfn "$prefix/Homebrew/bin/brew" "$prefix/bin/brew" 2>/dev/null || true
+      fi
+      find_brew_bin >/dev/null 2>&1
+    }
+
+    # If brew missing, try system install when sudo works; otherwise user-local
     if ! find_brew_bin >/dev/null 2>&1; then
-      install_homebrew_linux || true
+      if can_sudo_noninteractive; then
+        echo "Installing Homebrew for Linux (system prefix)..."
+        install_homebrew_linux_system || true
+      fi
+    fi
+    if ! find_brew_bin >/dev/null 2>&1; then
+      echo "Installing Homebrew for Linux (user prefix at ~/.linuxbrew)..."
+      install_homebrew_linux_user || true
     fi
 
     local brew_bin=""
