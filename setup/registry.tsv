@@ -8,3 +8,5 @@ zapper	debian	no	Install apps easily
 forgit	debian,macos	yes	Find git repos with uncommitted or unpushed work under a path
 passage	debian,macos	yes	Interactive pass browser with pins + MRU and clipboard helpers
 gpgobble	debian,macos	yes	Bulk import public keys and set ownertrust FULL (4) for non-local keys
+killport	debian,macos	yes	Free a port by killing listeners
+ssherpa	debian,macos	no	Alias-first SSH picker + interactive config writer

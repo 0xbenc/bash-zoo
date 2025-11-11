@@ -24,7 +24,7 @@ The goal is to speed up contributions, debugging, and safe automation by conveyi
   - `uninstall [--all]` — remove installed tools/aliases (with interactive selection via `gum` unless `--all`)
   - `update passwords` — per-folder `git` pull under `~/.password-store`
   - `update zoo` — refresh installed tools and the meta CLI (self-update)
-- `scripts/*.sh` — User-facing tools (e.g., `mfa.sh`, `uuid.sh`, `zapp.sh`, `zapper.sh`, `forgit.sh`, `gpgobble.sh`, `passage.sh`).
+- `scripts/*.sh` — User-facing tools (e.g., `mfa.sh`, `uuid.sh`, `zapp.sh`, `zapper.sh`, `forgit.sh`, `gpgobble.sh`, `passage.sh`, `killport.sh`, `ssherpa.sh`).
 - `setup/<os>/<tool>.sh` — Per-tool setup helpers for Debian/macOS.
 - `docs/update-zoo.md` — High-level self-update design (kept aligned with the code).
 - `docs/how-it-works.md` — This document.
@@ -230,6 +230,7 @@ write_installed_metadata_update(version=src_version, commit, repo_url, names...)
 - `mktemp` — Use `mktemp -d` for directories; always clean up best-effort.
 - `tar` — Used to copy directory trees portably without non-POSIX options.
 - Quoting — All paths are quoted; prefer `$(...)` over backticks.
+- Port discovery — `killport` prefers `ss` on Linux (from `iproute2`) and falls back to `lsof`; on macOS it uses `lsof`. It never escalates privileges and defaults to the current user’s processes.
 
 ---
 
@@ -301,6 +302,9 @@ write_installed_metadata_update(version=src_version, commit, repo_url, names...)
   - `bash-zoo update zoo --from ./`
 - Passwords update:
   - `bash-zoo update passwords`
+- Kill a dev server binding:
+  - `python3 -m http.server 8080 &` then `killport 8080`
+  - UDP example: `nc -u -l 5353 &` then `killport 5353 --udp --all --yes`
 - Uninstall:
   - `bash-zoo uninstall --all`
 - Regular update against remote:

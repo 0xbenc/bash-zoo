@@ -647,8 +647,10 @@ known_tools() {
   printf '%s\n' \
     forgit \
     gpgobble \
+    killport \
     mfa \
     passage \
+    ssherpa \
     uuid \
     zapp \
     zapper

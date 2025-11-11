@@ -35,6 +35,8 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 - [Tool Details](#tool-details)
   - [forgit](#forgit)
   - [gpgobble](#gpgobble)
+  - [killport](#killport)
+  - [ssherpa](#ssherpa)
   - [mfa](#mfa)
   - [passage](#passage)
   - [uuid](#uuid)
@@ -62,8 +64,10 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 | --- | --- | --- | --- | --- |
 | `forgit` | ✅ stable | Scan directories for Git repos needing commits or pushes | macOS, Debian/Ubuntu | `git` |
 | `gpgobble` | ✅ stable | Bulk‑import public keys and set ownertrust to FULL (4) for non‑local keys | macOS, Debian/Ubuntu | `gnupg` |
+| `killport` | ✅ stable | Free a TCP/UDP port with gum selection, TERM→KILL, and wait | macOS, Debian/Ubuntu | `lsof` (Linux optionally `iproute2` for `ss`) |
+| `ssherpa` | ✅ stable | Alias-first SSH host picker + interactive config writer | macOS, Debian/Ubuntu | none (gum UI only) |
 | `mfa` | ✅ stable | Generate TOTP codes from `pass` and copy them to your clipboard | macOS, Debian/Ubuntu | `pass`, `oathtool`, `fzf`, clipboard tool (`pbcopy`/`xclip`/`xsel`), optional `figlet` |
-| `passage` | 🧪 experimental | Interactive GNU Pass browser with pins and MRU; copy or reveal password | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
+| `passage` | ✅ stable | Interactive GNU Pass browser with pins and MRU; copy or reveal password | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
 | `uuid` | ✅ stable | Create and copy a fresh UUID without leaving the terminal | macOS, Debian/Ubuntu | `uuidgen` (or Python 3), clipboard tool (`pbcopy`/`xclip`/`xsel`) |
 | `zapp` | ✅ stable | Launch an AppImage or unpacked app stored under `~/zapps` | Debian/Ubuntu | none |
 | `zapper` | ✅ stable | Prepare, validate, and register new apps for `zapp` with desktop entries | Debian/Ubuntu | `desktop-file-utils` |
@@ -92,7 +96,40 @@ Notes
 - Works with the default macOS Bash 3.2; no GNU `find` required.
  - Add `-n`/`--dry-run` to preview all actions without changing your keyring.
 
+### killport
+
+`killport` frees a TCP or UDP port by discovering listeners, letting you select them with a gum UI, and sending a gentle `TERM` followed by an optional `KILL` after a short grace. It never escalates privileges and defaults to your own processes only.
+
+Usage
+
+```bash
+killport 3000                      # interactive select + confirm (TCP)
+killport 5353 --udp --all --yes    # target all UDP listeners non-interactively
+killport 8080 --list               # list found processes without acting
+```
+
+Notes
+- gum-only UI. On Linux, prefers `ss` if available; otherwise uses `lsof`.
+- Safe defaults: TERM → optional KILL after 3s; wait up to 5s for the port to free; never sudo.
+
 ### mfa
+
+### ssherpa
+
+`ssherpa` scans your `~/.ssh/config` and any `Include`d files, lists your Host entries, and lets you fuzzy-pick one with gum to connect. By default it hides pattern hosts (those with `*` or `?`), but you can include them with `--all`. It also includes an interactive “Add new alias…” flow to create or update Host stanzas in your config (atomic write, no sudo).
+
+Usage
+
+```bash
+ssherpa                          # pick and connect (always offers “Add new alias…”)
+ssherpa --print -- -L 8080:localhost:8080    # print the ssh command
+ssherpa --filter prod --user alice            # prefilter by text and user
+ssherpa --all                                 # include wildcard patterns too
+```
+
+Notes
+- Gum-only UI; no fzf. It parses `Host`, `HostName`, `User`, `Port`, and first `IdentityFile`. `Match` blocks are ignored.
+- Labels show `user@host:port [key]` when present; connection is always `ssh <alias>` so your config fully applies.
 
 `mfa` pulls TOTP codes from your [`pass`](https://www.passwordstore.org/) store, copies them to the clipboard, and shows a countdown until the next code rotation. It features fuzzy search (via `fzf`), optional big‑font display (`figlet`), and smart key‑bindings for quick selection. To make it work you need:
 
