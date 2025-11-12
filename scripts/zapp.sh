@@ -10,10 +10,18 @@ set -euo pipefail
 
 ZAPPS_DIR="$HOME/zapps"
 
+ensure_gum() {
+  if command -v gum >/dev/null 2>&1; then return 0; fi
+  echo "gum is required but not installed. Install it via Homebrew (brew install gum)." >&2
+  exit 1
+}
+
 if [[ ! -d "$ZAPPS_DIR" ]]; then
   echo "Directory '$ZAPPS_DIR' does not exist."
   exit 1
 fi
+
+ensure_gum
 
 folders=()
 while IFS= read -r -d '' d; do
@@ -25,27 +33,28 @@ if [[ ${#folders[@]} -eq 0 ]]; then
   exit 1
 fi
 
-letters=( {a..z} )
-echo "Available zapps:"
-for i in "${!folders[@]}"; do
-  key="${letters[$i]}"
-  name=$(basename "${folders[$i]}")
-  echo "  [$key] $name"
-  # Stop listing if we exceed letters range
-  if [[ $i -ge 25 ]]; then break; fi
+folder_labels=()
+for folder in "${folders[@]}"; do
+  base=$(basename "$folder")
+  short_path=${folder/#$HOME/~}
+  folder_labels+=("$base  —  $short_path")
 done
 
-read -r -p "Enter the letter corresponding to the zapp you want to run: " user_key
+selection=$(printf '%s\n' "${folder_labels[@]}" | gum choose --header "Select a zapp to launch" --height 20) || {
+  echo "No selection made. Exiting."
+  exit 1
+}
 
-# Translate letter to index
 sel_idx=-1
-for i in "${!folders[@]}"; do
-  if [[ "$user_key" == "${letters[$i]}" ]]; then sel_idx=$i; break; fi
-  if [[ $i -ge 25 ]]; then break; fi
+for i in "${!folder_labels[@]}"; do
+  if [[ "${folder_labels[$i]}" == "$selection" ]]; then
+    sel_idx=$i
+    break
+  fi
 done
 
 if [[ $sel_idx -lt 0 ]]; then
-  echo "Invalid selection. Exiting."
+  echo "Selection could not be resolved. Exiting."
   exit 1
 fi
 
@@ -103,19 +112,23 @@ elif [[ $exe_count -eq 1 ]]; then
   echo "Running $(basename "$search_dir") using $(basename "${executables[0]}")..."
   exec "${executables[0]}"
 else
-  echo "Multiple executables found in '$search_dir'. Choose one:"
-  for i in "${!executables[@]}"; do
-    echo "  [${letters[$i]}] $(basename "${executables[$i]}")"
-    if [[ $i -ge 25 ]]; then break; fi
+  exe_labels=()
+  for exe in "${executables[@]}"; do
+    exe_labels+=("$(basename "$exe")  —  ${exe/#$HOME/~}")
   done
-  read -r -p "Enter the letter corresponding to the executable you want to run: " exe_key
+  exe_selection=$(printf '%s\n' "${exe_labels[@]}" | gum choose --header "Select executable in $folder_basename" --height 15) || {
+    echo "No executable selected. Exiting."
+    exit 1
+  }
   pick=-1
-  for i in "${!executables[@]}"; do
-    if [[ "$exe_key" == "${letters[$i]}" ]]; then pick=$i; break; fi
-    if [[ $i -ge 25 ]]; then break; fi
+  for i in "${!exe_labels[@]}"; do
+    if [[ "${exe_labels[$i]}" == "$exe_selection" ]]; then
+      pick=$i
+      break
+    fi
   done
   if [[ $pick -lt 0 ]]; then
-    echo "Invalid selection. Exiting."
+    echo "Executable selection could not be resolved. Exiting."
     exit 1
   fi
   echo "Running $(basename "${executables[$pick]}")..."

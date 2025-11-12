@@ -554,6 +554,9 @@ update_zoo_cmd() {
 
   echo "-- summary --"
   echo "updated: $updated, up-to-date: $uptodate, failed: $failed, skipped: $skipped"
+  echo
+  echo "Refresh your terminal to load any updated aliases or PATH changes:"
+  echo '  exec "/usr/bin/zsh" -l'
 
   # Cleanup
   if [[ "$mode" == "clone" && -n "${tmp_dir:-}" ]]; then rm -rf "$tmp_dir" 2>/dev/null || true; fi
