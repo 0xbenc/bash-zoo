@@ -90,7 +90,7 @@ repos=()
 # Use gum spinner during discovery; write to a temp file to preserve NUL separation
 tmp_repos=$(mktemp "${TMPDIR:-/tmp}/forgit.repos.XXXXXX")
 if [[ $is_tty -eq 1 ]]; then
-  gum spin --spinner dot --title "Finding Git repositories under: $root_disp" -- \
+  gum spin --spinner points --title "Finding Git repositories under: $root_disp" -- \
     bash -c 'find "$1" -name .git -print0 > "$2" 2>/dev/null' _ "$start_dir" "$tmp_repos"
 else
   bash -c 'find "$1" -name .git -print0 > "$2" 2>/dev/null' _ "$start_dir" "$tmp_repos"
@@ -251,7 +251,7 @@ for repo in "${repos[@]}"; do
   # Run the single-repo scan under gum spin when available
   res=""
   if [[ $use_gum -eq 1 ]]; then
-    res=$(gum spin --spinner dot --title "$title" -- bash "$scan_script" "$repo" "${FORGIT_NO_NETWORK:-}")
+    res=$(gum spin --spinner points --title "$title" -- bash "$scan_script" "$repo" "${FORGIT_NO_NETWORK:-}")
   else
     progress_update "$title"
     res=$(bash "$scan_script" "$repo" "${FORGIT_NO_NETWORK:-}")

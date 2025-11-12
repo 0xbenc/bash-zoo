@@ -328,7 +328,7 @@ main() {
     local sec
     for sec in $(seq 1 "$WAIT_SECS"); do
       # spinner tick
-      gum spin --spinner dot --title "Waiting for :$PORT to free... (${sec}/${WAIT_SECS})" -- sleep 1 || sleep 1
+      gum spin --spinner points --title "Waiting for :$PORT to free... (${sec}/${WAIT_SECS})" -- sleep 1 || sleep 1
       discover_listeners "$PROTO" "$PORT" 1 "" # check any user
       if [[ ${#PIDS[@]} -eq 0 ]]; then remaining=0; break; else remaining=${#PIDS[@]}; fi
     done
