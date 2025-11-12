@@ -82,6 +82,35 @@ if [[ ! -d "$DIR" ]]; then
   exit 2
 fi
 
+# Styling: colors (TTY-aware, disabled by NO_COLOR) and gum availability
+is_tty=0
+if [[ -t 1 ]]; then is_tty=1; fi
+if [[ ${NO_COLOR:-} != "" ]]; then is_tty=0; fi
+
+BOLD=""; DIM=""; FG_BLUE=""; FG_GREEN=""; FG_YELLOW=""; FG_MAGENTA=""; FG_RED=""; FG_CYAN=""; FG_WHITE=""; RESET=""
+if [[ $is_tty -eq 1 ]] && command -v tput >/dev/null 2>&1; then
+  colors="$(tput colors 2>/dev/null || printf '0')"
+  if [[ "$colors" =~ ^[0-9]+$ ]] && [[ "$colors" -ge 8 ]]; then
+    BOLD="$(tput bold 2>/dev/null || printf '')"
+    DIM="$(tput dim 2>/dev/null || printf '')"
+    FG_BLUE="$(tput setaf 4 2>/dev/null || printf '')"
+    FG_GREEN="$(tput setaf 2 2>/dev/null || printf '')"
+    FG_YELLOW="$(tput setaf 3 2>/dev/null || printf '')"
+    FG_MAGENTA="$(tput setaf 5 2>/dev/null || printf '')"
+    FG_RED="$(tput setaf 1 2>/dev/null || printf '')"
+    FG_CYAN="$(tput setaf 6 2>/dev/null || printf '')"
+    FG_WHITE="$(tput setaf 7 2>/dev/null || printf '')"
+    RESET="$(tput sgr0 2>/dev/null || printf '')"
+  else
+    RESET="$(tput sgr0 2>/dev/null || printf '')"
+  fi
+fi
+
+use_gum=0
+if [[ $is_tty -eq 1 ]] && command -v gum >/dev/null 2>&1; then
+  use_gum=1
+fi
+
 # Collect candidate files (shallow, no recursion).
 prev_nullglob=$(shopt -p nullglob 2>/dev/null || true)
 prev_dotglob=$(shopt -p dotglob 2>/dev/null || true)
@@ -133,7 +162,7 @@ for f in "${FILES[@]}"; do
   )
   [[ ${#fps[@]} -gt 0 ]] || continue
 
-  printf '==> %s\n' "$f"
+  printf '%s==> %s%s\n' "${BOLD}${FG_BLUE}" "$f" "$RESET"
 
   # 2) Real import (idempotent if already present)
   if $dry_run; then
@@ -146,14 +175,21 @@ for f in "${FILES[@]}"; do
     done
     would_import_new_count=$((would_import_new_count+new_here))
     if [[ $new_here -gt 0 ]]; then
-      printf '    would import: %d new of %d key(s)\n' "$new_here" "${#fps[@]}"
+      printf '%s    would import: %d new of %d key(s)%s\n' "${DIM}" "$new_here" "${#fps[@]}" "${RESET}"
     else
-      printf '    would import (idempotent; all present)\n'
+      printf '%s    would import (idempotent; all present)%s\n' "${DIM}" "${RESET}"
     fi
   else
-    if ! gpg --batch --yes --quiet --import "$f" >/dev/null 2>&1; then
-      printf '    import failed (skipping)\n' >&2
-      continue
+    if [[ $use_gum -eq 1 ]]; then
+      if ! gum spin --spinner points --title "Importing: $(basename "$f")" -- gpg --batch --yes --quiet --import "$f" >/dev/null 2>&1; then
+        printf '%s    import failed (skipping)%s\n' "${FG_RED}" "${RESET}" >&2
+        continue
+      fi
+    else
+      if ! gpg --batch --yes --quiet --import "$f" >/dev/null 2>&1; then
+        printf '%s    import failed (skipping)%s\n' "${FG_RED}" "${RESET}" >&2
+        continue
+      fi
     fi
   fi
 
@@ -164,7 +200,7 @@ for f in "${FILES[@]}"; do
 
     # (A) Skip if a secret key exists locally
     if gpg --batch --quiet --list-secret-keys "$fp" >/dev/null 2>&1; then
-      printf '    skip (own secret key present): %s\n' "$fp"
+      printf '%s    skip (own secret key present): %s%s\n' "${FG_YELLOW}" "$fp" "${RESET}"
       processed_any=true
       skipped_secret_count=$((skipped_secret_count+1))
       continue
@@ -172,28 +208,28 @@ for f in "${FILES[@]}"; do
 
     # (B) Local-sign (idempotent). Avoid --batch so pinentry can prompt if needed.
     if $dry_run; then
-      printf '    would localsign (idempotent): %s\n' "$fp"
+      printf '%s    would localsign (idempotent): %s%s\n' "${DIM}${FG_MAGENTA}" "$fp" "${RESET}"
       would_lsign_count=$((would_lsign_count+1))
     else
       if gpg --quiet --yes --quick-lsign-key "$fp" >/dev/null 2>&1; then
-        printf '    localsign OK: %s\n' "$fp"
+        printf '%s    localsign OK:%s %s\n' "${FG_GREEN}" "${RESET}" "$fp"
       else
-        printf '    localsign FAILED (continuing to set ownertrust): %s\n' "$fp" >&2
+        printf '%s    localsign FAILED (continuing to set ownertrust): %s%s\n' "${FG_RED}" "$fp" "${RESET}" >&2
       fi
     fi
 
     # (C) Decide based on current ownertrust
     lvl="$(trust_level "$fp")"
     if [[ "$lvl" == "5" ]]; then
-      printf '    skip trust (already ultimate): %s\n' "$fp"
+      printf '%s    skip trust (already ultimate): %s%s\n' "${DIM}" "$fp" "${RESET}"
     elif [[ "$lvl" == "4" ]]; then
-      printf '    trust already full: %s\n' "$fp"
+      printf '%s    trust already full: %s%s\n' "${DIM}" "$fp" "${RESET}"
     else
       if $dry_run; then
-        printf '    would trust full (4): %s\n' "$fp"
+        printf '%s    would trust full (4): %s%s\n' "${FG_CYAN}" "$fp" "${RESET}"
         would_trust_full_count=$((would_trust_full_count+1))
       else
-        printf '    trust full (4): %s\n' "$fp"
+        printf '%s    trust full (4):%s %s\n' "${FG_CYAN}" "${RESET}" "$fp"
         TO_FULL+=( "$fp" )
       fi
     fi
@@ -208,19 +244,49 @@ if ! $dry_run; then
     tmp="$(mktemp "${TMPDIR:-/tmp}/gpgobble.XXXXXX" 2>/dev/null || mktemp)"
     trap 'rm -f "$tmp"' EXIT
     printf '%s\n' "${TO_FULL[@]}" | sort -u | awk '{printf "%s:4:\n",$0}' > "$tmp"
-    if ! gpg --batch --yes --quiet --import-ownertrust "$tmp" >/dev/null 2>&1; then
-      printf 'Failed importing ownertrust updates (file: %s)\n' "$tmp" >&2
-      exit 1
+    if [[ $use_gum -eq 1 ]]; then
+      if ! gum spin --spinner points --title "Applying ownertrust FULL (4) to $(printf '%s\n' "${TO_FULL[@]}" | sort -u | wc -l | awk '{print $1}') key(s)" -- gpg --batch --yes --quiet --import-ownertrust "$tmp" >/dev/null 2>&1; then
+        printf '%sFailed importing ownertrust updates (file: %s)%s\n' "${FG_RED}" "$tmp" "${RESET}" >&2
+        exit 1
+      fi
+    else
+      if ! gpg --batch --yes --quiet --import-ownertrust "$tmp" >/dev/null 2>&1; then
+        printf '%sFailed importing ownertrust updates (file: %s)%s\n' "${FG_RED}" "$tmp" "${RESET}" >&2
+        exit 1
+      fi
     fi
   fi
 
   if $processed_any; then
-    printf 'Done. Imported keys, local-signed non-local keys, and set ownertrust=FULL (4) where needed.\n'
+    done_msg='Done. Imported keys, local-signed non-local keys, and set ownertrust=FULL (4) where needed.'
+    if [[ $use_gum -eq 1 ]]; then
+      gum style --border double --align center --margin "1 2" --padding "1 4" "$done_msg"
+    else
+      printf '%s\n' "$done_msg"
+    fi
   else
-    printf 'No keys were imported.\n'
+    printf '%sNo keys were imported.%s\n' "${DIM}" "${RESET}"
   fi
 else
-  printf 'Dry run complete. No changes made.\n'
-  printf 'Summary: files=%d, keys=%d, skipped_secret=%d, would_lsign=%d, would_set_trust_full=%d, would_import_new=%d\n' \
-    "$files_scanned" "$keys_considered" "$skipped_secret_count" "$would_lsign_count" "$would_trust_full_count" "$would_import_new_count"
+  if [[ $use_gum -eq 1 ]]; then
+    gum_lines=(
+      "Dry run complete. No changes made."
+      "files: $files_scanned"
+      "keys: $keys_considered"
+      "skipped_secret: $skipped_secret_count"
+      "would_lsign: $would_lsign_count"
+      "would_set_trust_full: $would_trust_full_count"
+      "would_import_new: $would_import_new_count"
+    )
+    gum_width=50
+    for line in "${gum_lines[@]}"; do
+      len=${#line}
+      if [[ $len -gt $gum_width ]]; then gum_width=$len; fi
+    done
+    gum style --border double --align center --width "$gum_width" --margin "1 2" --padding "1 4" "${gum_lines[@]}"
+  else
+    printf 'Dry run complete. No changes made.\n'
+    printf 'Summary: files=%d, keys=%d, skipped_secret=%d, would_lsign=%d, would_set_trust_full=%d, would_import_new=%d\n' \
+      "$files_scanned" "$keys_considered" "$skipped_secret_count" "$would_lsign_count" "$would_trust_full_count" "$would_import_new_count"
+  fi
 fi

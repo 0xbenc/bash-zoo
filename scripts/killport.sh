@@ -35,6 +35,29 @@ EOF
 
 echo_err() { printf '%s\n' "$*" >&2; }
 
+## Colors (TTY-aware; disabled with NO_COLOR)
+is_tty=0
+if [[ -t 1 ]]; then is_tty=1; fi
+if [[ ${NO_COLOR:-} != "" ]]; then is_tty=0; fi
+
+BOLD=""; DIM=""; FG_BLUE=""; FG_GREEN=""; FG_YELLOW=""; FG_MAGENTA=""; FG_RED=""; FG_CYAN=""; RESET=""
+if [[ $is_tty -eq 1 ]] && command -v tput >/dev/null 2>&1; then
+  colors="$(tput colors 2>/dev/null || printf '0')"
+  if [[ "$colors" =~ ^[0-9]+$ ]] && [[ "$colors" -ge 8 ]]; then
+    BOLD="$(tput bold 2>/dev/null || printf '')"
+    DIM="$(tput dim 2>/dev/null || printf '')"
+    FG_BLUE="$(tput setaf 4 2>/dev/null || printf '')"
+    FG_GREEN="$(tput setaf 2 2>/dev/null || printf '')"
+    FG_YELLOW="$(tput setaf 3 2>/dev/null || printf '')"
+    FG_MAGENTA="$(tput setaf 5 2>/dev/null || printf '')"
+    FG_RED="$(tput setaf 1 2>/dev/null || printf '')"
+    FG_CYAN="$(tput setaf 6 2>/dev/null || printf '')"
+    RESET="$(tput sgr0 2>/dev/null || printf '')"
+  else
+    RESET="$(tput sgr0 2>/dev/null || printf '')"
+  fi
+fi
+
 ensure_gum() {
   if command -v gum >/dev/null 2>&1; then return 0; fi
   echo_err "gum is required. Install it with Homebrew:"
@@ -128,8 +151,12 @@ discover_listeners() {
 print_found_lines() {
   local i proto="$1" port="$2"
   for i in "${!PIDS[@]}"; do
-    printf '[found] pid=%s user=%s proto=%s port=%s cmd=%s\n' \
-      "${PIDS[$i]}" "${USERS[$i]}" "$proto" "$port" "${CMDS[$i]}"
+    printf '%s[found]%s\n' "$FG_BLUE" "$RESET"
+    printf '  • pid=%s%s%s\n'   "$BOLD$FG_CYAN" "${PIDS[$i]}" "$RESET"
+    printf '  • user=%s%s%s\n'  "$BOLD$FG_CYAN" "${USERS[$i]}" "$RESET"
+    printf '  • proto=%s%s%s\n' "$BOLD$FG_CYAN" "$proto" "$RESET"
+    printf '  • port=%s%s%s\n'  "$BOLD$FG_CYAN" "$port" "$RESET"
+    printf '  • cmd=%s%s%s\n'   "$BOLD$FG_CYAN" "${CMDS[$i]}" "$RESET"
   done
 }
 
@@ -197,7 +224,7 @@ main() {
   if [[ $LIST_ONLY -eq 1 ]]; then exit 0; fi
 
   if [[ ${#PIDS[@]} -eq 0 ]]; then
-    echo "[up-to-date] port $PORT (no listeners)"
+    printf '%s[up-to-date]%s port %s (no listeners)\n' "$FG_GREEN" "$RESET" "$PORT"
     exit 0
   fi
 
@@ -222,8 +249,8 @@ main() {
         [[ -z "$line" ]] && continue
         chosen+=("$line")
       done < <(printf '%s\n' "${lines[@]}" | gum choose --no-limit --header "Select processes on :$PORT")
-      if [[ ${#chosen[@]} -eq 0 ]]; then
-        echo "[skipped] no selection made"
+  if [[ ${#chosen[@]} -eq 0 ]]; then
+        printf '%s[skipped]%s no selection made\n' "$FG_YELLOW" "$RESET"
         exit 0
       fi
       # Map chosen back to indices via pid
@@ -246,7 +273,7 @@ main() {
   if [[ $NO_WAIT -ne 1 ]]; then
     plan+="; wait ${WAIT_SECS}s"
   fi
-  echo "$plan"
+  gum style --border normal --margin "1 2" --padding "0 2" "$plan"
 
   # Cross-user guard: if selected contain other-user and ALL_USERS not set
   local need_cross_confirm=0 i u curr
@@ -272,7 +299,7 @@ main() {
   # Final confirmation unless --yes
   if [[ $YES -ne 1 ]]; then
     if ! gum confirm "Proceed?"; then
-      echo "[skipped] user cancelled"
+      printf '%s[skipped]%s user cancelled\n' "$FG_YELLOW" "$RESET"
       exit 0
     fi
   fi
@@ -290,19 +317,19 @@ main() {
     pid="${targets[$idx]}"; owner="${targets_users[$idx]}"; ok_owner=1
     # Owner guard
     if [[ $ALL_USERS -ne 1 && "$owner" != "$(current_user)" ]]; then
-      echo "[skipped] pid=$pid $owner-owned (use --all-users)"; ((skipped+=1)); continue
+      printf '%s[skipped]%s pid=%s %s-owned (use --all-users)\n' "$FG_YELLOW" "$RESET" "$pid" "$owner"; ((skipped+=1)); continue
     fi
     # Just-in-time check still listening
     if ! pid_in_current_scan "$pid" "$PROTO" "$PORT" "$ALL_USERS" "$USER_FILTER"; then
-      echo "[skipped] pid=$pid no longer listening"; ((skipped+=1)); continue
+      printf '%s[skipped]%s pid=%s no longer listening\n' "$FG_YELLOW" "$RESET" "$pid"; ((skipped+=1)); continue
     fi
     if [[ $DRY_RUN -eq 1 ]]; then
-      echo "[killed] pid=$pid signal=$SIGNAL (dry-run)"; ((killed+=1)); continue
+      printf '%s[killed]%s pid=%s signal=%s (dry-run)\n' "$FG_GREEN" "$RESET" "$pid" "$SIGNAL"; ((killed+=1)); continue
     fi
     if kill -"$SIGNAL" "$pid" 2>/dev/null; then
-      echo "[killed] pid=$pid signal=$SIGNAL"; ((killed+=1))
+      printf '%s[killed]%s pid=%s signal=%s\n' "$FG_GREEN" "$RESET" "$pid" "$SIGNAL"; ((killed+=1))
     else
-      echo "[failed] pid=$pid (permission denied or no such process)"; ((failed+=1))
+      printf '%s[failed]%s pid=%s (permission denied or no such process)\n' "$FG_RED" "$RESET" "$pid"; ((failed+=1))
     fi
   done
 
@@ -315,9 +342,9 @@ main() {
         continue
       fi
       if kill -9 "$pid" 2>/dev/null; then
-        echo "[escalated] pid=$pid signal=KILL"; ((escalated+=1))
+        printf '%s[escalated]%s pid=%s signal=KILL\n' "$FG_MAGENTA" "$RESET" "$pid"; ((escalated+=1))
       else
-        echo "[failed] pid=$pid (escalation failed)"; ((failed+=1))
+        printf '%s[failed]%s pid=%s (escalation failed)\n' "$FG_RED" "$RESET" "$pid"; ((failed+=1))
       fi
     done
   fi
@@ -333,7 +360,7 @@ main() {
       if [[ ${#PIDS[@]} -eq 0 ]]; then remaining=0; break; else remaining=${#PIDS[@]}; fi
     done
     if [[ $remaining -gt 0 ]]; then
-      echo "[timeout] port $PORT still bound after ${WAIT_SECS}s"
+      printf '%s[timeout]%s port %s still bound after %ss\n' "$FG_RED" "$RESET" "$PORT" "$WAIT_SECS"
     fi
   else
     # Rough snapshot
@@ -341,8 +368,13 @@ main() {
     remaining=${#PIDS[@]}
   fi
 
-  echo "-- summary --"
-  echo "killed: $killed, escalated: $escalated, skipped: $skipped, failed: $failed, remaining: $remaining"
+  gum style \
+    --border double \
+    --align center \
+    --margin "1 2" \
+    --padding "1 4" \
+    "Summary for :$PORT ($PROTO)" \
+    "killed: $killed, escalated: $escalated, skipped: $skipped, failed: $failed, remaining: $remaining"
 }
 
 main "$@"

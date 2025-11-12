@@ -53,4 +53,40 @@ UUID="$(gen_uuid)"
 if ! copy_clipboard "$UUID"; then
   echo "Warning: no clipboard tool found (pbcopy/xclip/xsel)." >&2
 fi
-echo "UUID copied to clipboard: $UUID"
+
+# Colors (TTY-aware, disabled by NO_COLOR)
+is_tty=0
+if [[ -t 1 ]]; then is_tty=1; fi
+if [[ ${NO_COLOR:-} != "" ]]; then is_tty=0; fi
+
+FG_CYAN=""; RESET=""; BOLD=""
+if [[ $is_tty -eq 1 ]] && command -v tput >/dev/null 2>&1; then
+  colors="$(tput colors 2>/dev/null || printf '0')"
+  if [[ "$colors" =~ ^[0-9]+$ ]] && [[ "$colors" -ge 8 ]]; then
+    FG_CYAN="$(tput setaf 6 2>/dev/null || printf '')"
+    BOLD="$(tput bold 2>/dev/null || printf '')"
+    RESET="$(tput sgr0 2>/dev/null || printf '')"
+  else
+    RESET="$(tput sgr0 2>/dev/null || printf '')"
+  fi
+fi
+
+# Basic gum styling when available and writing to a TTY
+use_gum=0
+if [[ -t 1 ]] && command -v gum >/dev/null 2>&1; then
+  use_gum=1
+fi
+
+if [[ $use_gum -eq 1 ]]; then
+  # Colorize UUID within styled box (ANSI preserved by gum)
+  gum style \
+    --border double \
+    --align center \
+    --margin "1 2" \
+    --padding "1 3" \
+    "UUID copied to clipboard" \
+    "${FG_CYAN}${UUID}${RESET}"
+else
+  # Plain fallback with colored UUID when possible
+  printf 'UUID copied to clipboard: %s%s%s\n' "$FG_CYAN" "$UUID" "$RESET"
+fi
