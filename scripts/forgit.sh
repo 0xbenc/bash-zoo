@@ -254,7 +254,8 @@ for repo in "${repos[@]}"; do
 $res
 EOF
 
-  # Counters
+  # Counters sourced directly from the scan helper results so we don't
+  # re-run the expensive git checks.
   if [[ "$has_changes" == "1" ]]; then
     changes_count=$((changes_count+1))
   fi
@@ -272,119 +273,7 @@ EOF
     behind_count_total=$((behind_count_total+1))
   fi
 
-  # Uncommitted/untracked changes
-  if [[ -n "$(git -C "$repo" status --porcelain 2>/dev/null || true)" ]]; then
-    has_changes=1; changes_count=$((changes_count+1))
-  fi
-
-  # Determine current branch (robustly) and ahead state
-  # Prefer symbolic-ref (quiet) to avoid odd outputs and exit statuses
-  branch_name="$(git -C "$repo" symbolic-ref --short -q HEAD 2>/dev/null || true)"
-  if [[ -n "$branch_name" ]]; then
-    branch_disp="$branch_name"
-  else
-    # Detached HEAD; try to show short commit
-    shorthash="$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || true)"
-    if [[ -n "$shorthash" ]]; then
-      branch_disp="detached@$shorthash"
-    else
-      branch_disp="detached"
-    fi
-  fi
-  # Sanitize any stray newlines/carriage returns
-  branch_disp=${branch_disp//$'\r'/}
-  branch_disp=${branch_disp//$'\n'/ }
-
-  if [[ -n "$branch_name" ]]; then
-    # Determine upstream configuration
-    up_remote="$(git -C "$repo" config --get "branch.$branch_name.remote" 2>/dev/null || true)"
-    up_merge="$(git -C "$repo" config --get "branch.$branch_name.merge" 2>/dev/null || true)" # e.g., refs/heads/main
-
-    # If there is no upstream configured, retain prior behavior
-    if [[ -z "$up_remote" || -z "$up_merge" || "$up_remote" == "." ]]; then
-      if git -C "$repo" rev-parse HEAD >/dev/null 2>&1; then
-        ahead_state="no-upstream"
-        has_remote_issue=1
-        ahead_no_upstream_count=$((ahead_no_upstream_count+1))
-        ahead_count_total=$((ahead_count_total+1))
-      fi
-    else
-      # Network checks can be disabled via env; default enabled
-      do_network=1
-      if [[ ${FORGIT_NO_NETWORK:-} != "" ]]; then
-        do_network=0
-      fi
-
-      # Try to read the remote tip without updating refs; never prompt
-      remote_failed=0
-      remote_commit=""
-      if [[ $do_network -eq 1 ]]; then
-        # Guard the pipeline with '|| true' so pipefail doesn't abort the script
-        # when the remote is unreachable or the ref doesn't exist.
-        remote_commit="$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes" \
-          git -C "$repo" ls-remote --exit-code "$up_remote" "$up_merge" 2>/dev/null \
-          | awk 'NR==1 {print $1}' || true)"
-        if [[ -z "$remote_commit" ]]; then
-          remote_failed=1
-        fi
-      else
-        remote_failed=1
-      fi
-
-      # Decide ahead/behind
-      if [[ $remote_failed -eq 0 ]]; then
-        # If we have the remote commit locally, compute symmetric counts
-        if git -C "$repo" cat-file -e "$remote_commit^{commit}" >/dev/null 2>&1; then
-          lr_counts="$(git -C "$repo" rev-list --left-right --count "HEAD...$remote_commit" 2>/dev/null || echo "")"
-          if [[ -n "$lr_counts" ]]; then
-            # Parse "A\tB"
-            ahead_n="${lr_counts%%$'\t'*}"
-            behind_n_tmp="${lr_counts#*$'\t'}"
-            # Normalize to numbers
-            if [[ -z "$ahead_n" ]]; then ahead_n=0; fi
-            if [[ -z "$behind_n_tmp" || "$behind_n_tmp" == "$lr_counts" ]]; then behind_n_tmp=0; fi
-            if [[ "$ahead_n" -gt 0 ]]; then
-              ahead_state="$ahead_n"
-              has_remote_issue=1
-              ahead_count_total=$((ahead_count_total+1))
-            fi
-            if [[ "$behind_n_tmp" -gt 0 ]]; then
-              behind_state="$behind_n_tmp"
-              has_remote_issue=1
-              behind_count_total=$((behind_count_total+1))
-            fi
-          fi
-        else
-          # Remote commit not present locally; ahead via @{u}, behind unknown
-          if git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
-            ahead_n="$(git -C "$repo" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
-            if [[ "${ahead_n:-0}" -gt 0 ]]; then
-              ahead_state="$ahead_n"
-              has_remote_issue=1
-              ahead_count_total=$((ahead_count_total+1))
-            fi
-          fi
-          behind_state="unknown"
-          has_remote_issue=1
-          behind_unknown_total=$((behind_unknown_total+1))
-        fi
-      else
-        # Network failed or disabled; fall back to local tracking for ahead; behind is stale
-        if git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
-          ahead_n="$(git -C "$repo" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
-          if [[ "${ahead_n:-0}" -gt 0 ]]; then
-            ahead_state="$ahead_n"
-            has_remote_issue=1
-            ahead_count_total=$((ahead_count_total+1))
-          fi
-        fi
-        behind_state="stale"
-        behind_stale_total=$((behind_stale_total+1))
-      fi
-    fi
-  fi
-
-  if [[ $has_changes -eq 1 || $has_remote_issue -eq 1 ]]; then
+  if [[ "$has_changes" == "1" || "$has_remote_issue" == "1" ]]; then
     out_repo+=("$disp")
     out_has_changes+=("$has_changes")
     out_ahead+=("$ahead_state")
@@ -451,7 +340,33 @@ for i in "${!out_repo[@]}"; do
   fi
 done
 
-# Summary line
-printf "${DIM}%s${RESET}\n" "changes: $changes_count  |  ahead: $ahead_count_total (${ahead_no_upstream_count} no-remote)  |  behind: $behind_count_total (${behind_unknown_total} unknown, ${behind_stale_total} stale)"
+summary_lines=(
+  "changes: $changes_count"
+  "ahead: $ahead_count_total (${ahead_no_upstream_count} no-remote)"
+  "behind: $behind_count_total (${behind_unknown_total} unknown, ${behind_stale_total} stale)"
+)
+
+if [[ $is_tty -eq 1 ]] && command -v gum >/dev/null 2>&1; then
+  gum_width=50
+  for line in "${summary_lines[@]}"; do
+    len=${#line}
+    if [[ $len -gt $gum_width ]]; then
+      gum_width=$len
+    fi
+  done
+  gum style \
+    --foreground 212 \
+    --border-foreground 212 \
+    --border double \
+    --align center \
+    --width "$gum_width" \
+    --margin "1 2" \
+    --padding "1 4" \
+    "${summary_lines[@]}"
+else
+  for line in "${summary_lines[@]}"; do
+    printf "${DIM}%s${RESET}\n" "$line"
+  done
+fi
 
 exit 1
