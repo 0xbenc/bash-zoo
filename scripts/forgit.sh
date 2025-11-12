@@ -59,6 +59,12 @@ fi
 
 # Resolve absolute base path for nicer relative names
 base_abs=$(cd "$start_dir" && pwd)
+# Derive a human-friendly root label; annotate when it's the current dir
+cwd_abs=$(pwd)
+root_disp="$start_dir"
+if [[ "$base_abs" == "$cwd_abs" ]]; then
+  root_disp="$(basename "$cwd_abs") (cwd)"
+fi
 
 # Small helpers for plain progress (TTY only, gum fallback)
 progress_active=0
@@ -84,7 +90,7 @@ repos=()
 # Use gum spinner during discovery; write to a temp file to preserve NUL separation
 tmp_repos=$(mktemp "${TMPDIR:-/tmp}/forgit.repos.XXXXXX")
 if [[ $is_tty -eq 1 ]]; then
-  gum spin --spinner dot --title "Finding Git repositories under: $start_dir" -- \
+  gum spin --spinner dot --title "Finding Git repositories under: $root_disp" -- \
     bash -c 'find "$1" -name .git -print0 > "$2" 2>/dev/null' _ "$start_dir" "$tmp_repos"
 else
   bash -c 'find "$1" -name .git -print0 > "$2" 2>/dev/null' _ "$start_dir" "$tmp_repos"
@@ -96,11 +102,11 @@ done <"$tmp_repos"
 rm -f "$tmp_repos"
 
 if [[ ${#repos[@]} -eq 0 ]]; then
-  echo "No Git repositories found under: $start_dir"
+  echo "No Git repositories found under: $root_disp"
   exit 0
 fi
 
-echo "${DIM}Scanning ${#repos[@]} Git repos under: ${start_dir}${RESET}"
+echo "${DIM}Scanning ${#repos[@]} Git repos under: ${root_disp}${RESET}"
 
 # Gather results first to format neatly
 out_repo=()
@@ -235,6 +241,9 @@ for repo in "${repos[@]}"; do
     "$base_abs"/*) disp="${rep_abs#"$base_abs"/}" ;;
     "$base_abs")    disp="." ;;
   esac
+  if [[ "$disp" == "." && "$base_abs" == "$cwd_abs" ]]; then
+    disp="$root_disp"
+  fi
 
   idx=$((idx+1))
   title="Scanning ${idx}/${total}: ${disp}"
