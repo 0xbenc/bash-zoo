@@ -39,22 +39,29 @@ if [[ ! -d "$start_dir" ]]; then
   exit 2
 fi
 
-# Color helpers (ANSI; disabled if NO_COLOR or non-tty)
+# Color helpers (terminfo via tput; disabled if NO_COLOR or non-tty)
 is_tty=0
 if [[ -t 1 ]]; then is_tty=1; fi
 if [[ ${NO_COLOR:-} != "" ]]; then is_tty=0; fi
 
-if [[ $is_tty -eq 1 ]]; then
-  RESET=$'\033[0m'
-  BOLD=$'\033[1m'
-  DIM=$'\033[2m'
-  FG_YELLOW=$'\033[33m'
-  FG_MAGENTA=$'\033[35m'
-  FG_CYAN=$'\033[36m'
-  FG_GREEN=$'\033[32m'
-  FG_RED=$'\033[31m'
-else
-  RESET=""; BOLD=""; DIM=""; FG_YELLOW=""; FG_MAGENTA=""; FG_CYAN=""; FG_GREEN=""; FG_RED=""
+# Initialize color/style variables (default to empty when unusable)
+BOLD=""; DIM=""; FG_BLUE=""; FG_GREEN=""; FG_YELLOW=""; FG_MAGENTA=""; FG_RED=""; FG_CYAN=""; FG_WHITE=""; RESET=""
+if [[ $is_tty -eq 1 ]] && command -v tput >/dev/null 2>&1; then
+  colors="$(tput colors 2>/dev/null || printf '0')"
+  if [[ "$colors" =~ ^[0-9]+$ ]] && [[ "$colors" -ge 8 ]]; then
+    BOLD="$(tput bold 2>/dev/null || printf '')"
+    DIM="$(tput dim 2>/dev/null || printf '')"
+    FG_BLUE="$(tput setaf 4 2>/dev/null || printf '')"
+    FG_GREEN="$(tput setaf 2 2>/dev/null || printf '')"
+    FG_YELLOW="$(tput setaf 3 2>/dev/null || printf '')"
+    FG_MAGENTA="$(tput setaf 5 2>/dev/null || printf '')"
+    FG_RED="$(tput setaf 1 2>/dev/null || printf '')"
+    FG_CYAN="$(tput setaf 6 2>/dev/null || printf '')"
+    FG_WHITE="$(tput setaf 7 2>/dev/null || printf '')"
+    RESET="$(tput sgr0 2>/dev/null || printf '')"
+  else
+    RESET="$(tput sgr0 2>/dev/null || printf '')"
+  fi
 fi
 
 # Resolve absolute base path for nicer relative names
@@ -364,8 +371,6 @@ if [[ $is_tty -eq 1 ]] && command -v gum >/dev/null 2>&1; then
     fi
   done
   gum style \
-    --foreground 212 \
-    --border-foreground 212 \
     --border double \
     --align center \
     --width "$gum_width" \
