@@ -220,6 +220,16 @@ What it does:
 
 ## Installation
 
+Prerequisites
+- Install Homebrew and gum before running the installer.
+  - macOS
+    - Install Homebrew: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
+    - Install gum: `brew install gum`
+  - Debian/Ubuntu
+    - Install Homebrew (Linuxbrew): `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
+    - Ensure brew is in PATH for this shell: `eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"`
+    - Install gum: `brew install gum`
+
 ### Option A — Guided installer (recommended)
 
 ```bash
@@ -236,9 +246,7 @@ cd bash-zoo
 - Include experimental tools by adding `--exp` (e.g., `./install.sh --exp`).
 - Skip prompts with `./install.sh --all` (respects `--exp` filtering).
 - Interactive picker also includes an "All" option to select everything.
-- Uses `gum` for the interactive selector. On macOS, the installer uses Homebrew to install `gum` when missing. On Linux (Debian/Ubuntu), the installer ensures Homebrew for Linux is present: it installs to the system prefix when non‑interactive sudo is available, otherwise it performs a user‑local install at `~/.linuxbrew`, then installs `gum`. On user‑local Linuxbrew, some formulae may build from source; installing `gum` can take several minutes the first time.
-  - If a user‑local Linuxbrew is created, the installer evaluates `brew shellenv` for the current run so the UI works immediately. To make `brew` permanent in new shells, add:
-    `eval "$(~/.linuxbrew/bin/brew shellenv)"` to your shell rc.
+- Gum is a required dependency for the interactive selector. The installer does not install prerequisites; ensure `brew` and `gum` are set up first.
 
 ### Option B — Manual pick-and-run
 
@@ -316,7 +324,7 @@ The installer is idempotent: re-running only tweaks what changed and offers new 
 ./uninstall.sh --all  # remove every Bash Zoo alias and binary in one go
 ```
 
-The interactive uninstaller uses `gum` and also includes an "All" option for quick removal. On Linux, it ensures Homebrew exists (system prefix with sudo, or user‑local at `~/.linuxbrew`) and installs `gum` automatically if missing.
+The interactive uninstaller uses `gum` and also includes an "All" option for quick removal. Prerequisite: `gum` must be installed and in PATH.
 
 Then restart your shell so aliases disappear: `exec "$SHELL" -l`.
 

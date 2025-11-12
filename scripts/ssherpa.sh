@@ -33,7 +33,8 @@ echo_err() { printf '%s\n' "$*" >&2; }
 
 ensure_gum() {
   if command -v gum >/dev/null 2>&1; then return 0; fi
-  echo_err "gum is required; install via the Bash Zoo installer."
+  echo_err "gum is required. Install it with Homebrew:"
+  echo_err "  brew install gum"
   return 1
 }
 

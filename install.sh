@@ -307,6 +307,34 @@ if [[ "$OS_TYPE" == "other" ]]; then
     exit 0
 fi
 
+# Prerequisites check (brew + gum)
+require_prereqs_or_exit() {
+  local missing=0 brew_missing=0 gum_missing=0
+  if ! command -v brew >/dev/null 2>&1; then
+    echo "Error: Homebrew (brew) is not in PATH." >&2
+    missing=1; brew_missing=1
+  fi
+  if ! command -v gum >/dev/null 2>&1; then
+    echo "Error: gum is not installed." >&2
+    missing=1; gum_missing=1
+  fi
+  if [[ $missing -eq 0 ]]; then
+    return 0
+  fi
+  echo >&2
+  echo "Install prerequisites, then re-run ./install.sh:" >&2
+  if [[ $brew_missing -eq 1 ]]; then
+    echo '  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' >&2
+  fi
+  if [[ $gum_missing -eq 1 ]]; then
+    echo '  brew install gum' >&2
+  fi
+  exit 1
+}
+
+# Prerequisites (brew + gum) are required for all modes
+require_prereqs_or_exit
+
 # Play rotating ASCII animation once before showing selector
 play_ascii_once
 
@@ -436,135 +464,6 @@ fi
 # Ensure the uninstaller is executable for convenience
 chmod +x "$PWD/uninstall.sh" 2>/dev/null || true
 
-#############################################
-# Interactive selection (gum only)
-#############################################
-
-# Ensure gum exists; on Linux, ensure Homebrew first with a resilient bootstrap
-ensure_gum() {
-  if command -v gum >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if [[ "$OS_TYPE" == "macos" ]]; then
-    if command -v brew >/dev/null 2>&1; then
-      echo "Preparing selector (installing gum via Homebrew)..."
-      brew list --versions gum >/dev/null 2>&1 || brew install gum >/dev/null 2>&1 || true
-      command -v gum >/dev/null 2>&1 && return 0
-    fi
-    return 1
-  fi
-
-  if [[ "$OS_TYPE" == "debian" ]]; then
-    # Locate brew if present
-    find_brew_bin() {
-      if command -v brew >/dev/null 2>&1; then
-        command -v brew
-        return 0
-      fi
-      for prefix in /home/linuxbrew/.linuxbrew "$HOME/.linuxbrew"; do
-        if [[ -x "$prefix/bin/brew" ]]; then
-          echo "$prefix/bin/brew"
-          return 0
-        fi
-      done
-      return 1
-    }
-
-    can_sudo_noninteractive() {
-      if ! command -v sudo >/dev/null 2>&1; then return 1; fi
-      sudo -n true >/dev/null 2>&1
-    }
-
-    install_homebrew_linux_system() {
-      # Install to /home/linuxbrew via official script if non-interactive sudo works
-      local tmp_dir installer
-      tmp_dir=$(mktemp -d)
-      installer="$tmp_dir/install-homebrew.sh"
-      if curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$installer"; then
-        chmod +x "$installer" || true
-        NONINTERACTIVE=1 /bin/bash "$installer" || true
-      fi
-      rm -rf "$tmp_dir" 2>/dev/null || true
-      find_brew_bin >/dev/null 2>&1
-    }
-
-    install_homebrew_linux_system_prompt() {
-      # Interactive sudo prompt path for system prefix when allowed
-      local tmp_dir installer
-      tmp_dir=$(mktemp -d)
-      installer="$tmp_dir/install-homebrew.sh"
-      if curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$installer"; then
-        chmod +x "$installer" || true
-        /bin/bash "$installer" || true
-      fi
-      rm -rf "$tmp_dir" 2>/dev/null || true
-      find_brew_bin >/dev/null 2>&1
-    }
-
-    install_homebrew_linux_user() {
-      # User-local (unsupported) install to ~/.linuxbrew — no sudo required
-      local prefix="$HOME/.linuxbrew"
-      mkdir -p "$prefix" 2>/dev/null || true
-      if [[ ! -x "$prefix/bin/brew" ]]; then
-        if command -v git >/dev/null 2>&1; then
-          if [[ ! -d "$prefix/Homebrew/.git" ]]; then
-            git clone --depth=1 https://github.com/Homebrew/brew "$prefix/Homebrew" >/dev/null 2>&1 || true
-          fi
-        elif command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1; then
-          mkdir -p "$prefix/Homebrew" 2>/dev/null || true
-          curl -fsSL https://github.com/Homebrew/brew/tarball/HEAD | tar -xz -C "$prefix/Homebrew" --strip-components=1 >/dev/null 2>&1 || true
-        fi
-        mkdir -p "$prefix/bin" 2>/dev/null || true
-        ln -sfn "$prefix/Homebrew/bin/brew" "$prefix/bin/brew" 2>/dev/null || true
-      fi
-      find_brew_bin >/dev/null 2>&1
-    }
-
-    # If brew missing, try system install when sudo works; otherwise user-local
-    if ! find_brew_bin >/dev/null 2>&1; then
-      if can_sudo_noninteractive; then
-        echo "Installing Homebrew for Linux (system prefix)..."
-        install_homebrew_linux_system || true
-      fi
-    fi
-    # If still missing and we are in a TTY, optionally prompt for sudo to install system prefix
-    if ! find_brew_bin >/dev/null 2>&1; then
-      if [[ -t 0 && -t 1 && -z "${BZ_NO_SUDO_PROMPT:-}" ]] && command -v sudo >/dev/null 2>&1; then
-        echo "Installing Homebrew for Linux (system prefix; will prompt for sudo password)..."
-        install_homebrew_linux_system_prompt || true
-      fi
-    fi
-    if ! find_brew_bin >/dev/null 2>&1; then
-      echo "Installing Homebrew for Linux (user prefix at ~/.linuxbrew)..."
-      install_homebrew_linux_user || true
-    fi
-
-    local brew_bin=""
-    if brew_bin=$(find_brew_bin); then
-      # Bring brew into PATH for this process
-      eval "$($brew_bin shellenv)"
-      echo "Preparing selector (installing gum via Homebrew for Linux)..."
-      # Avoid slow auto-updates during bootstrap; show install output if needed
-      if ! "$brew_bin" list --versions gum >/dev/null 2>&1; then
-        local bpfx
-        bpfx=$("$brew_bin" --prefix 2>/dev/null || true)
-        if [[ "$bpfx" == "$HOME/.linuxbrew"* ]]; then
-          echo "Installing gum under user-local Homebrew (may build from source; this can take several minutes)."
-          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 "$brew_bin" install -v gum || true
-        else
-          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 "$brew_bin" install gum || true
-        fi
-      fi
-      command -v gum >/dev/null 2>&1 && return 0
-    fi
-
-    return 1
-  fi
-
-  return 1
-}
-
 # Build selection (gum only)
 selected_names=()
 if [[ $names_given -eq 1 ]]; then
@@ -575,13 +474,7 @@ elif [[ $select_all -eq 1 ]]; then
     echo "Selecting all available scripts for $OS_TYPE."
     selected_names=("${scripts[@]}")
 else
-    if ! ensure_gum; then
-        echo "Error: gum is required for interactive selection and could not be installed automatically." >&2
-        echo "- On macOS: install Homebrew and run 'brew install gum'." >&2
-        echo "- On Debian/Ubuntu: ensure network access, then re-run install so Homebrew for Linux can be bootstrapped automatically." >&2
-        echo "Alternatively, use --all or --names to run without the interactive UI." >&2
-        exit 1
-    fi
+    require_prereqs_or_exit
 
     gum_labels=()
     gum_labels+=("all — All (everything below)")
@@ -753,6 +646,8 @@ add_path_line() {
     echo "$line" >> "$rc_file"
 }
 
+ 
+
 install_file() {
     local src="$1" dst_dir="$2" name="$3"
     local dst="$dst_dir/$name"
@@ -894,6 +789,8 @@ if [[ ${#installed_to_bin[@]} -gt 0 ]]; then
         echo "Added."
     fi
 fi
+
+ 
 
 # Summaries
 if [[ ${#installed_to_bin[@]} -gt 0 ]]; then

@@ -11,7 +11,7 @@ The goal is to speed up contributions, debugging, and safe automation by conveyi
 - Shell: Bash with `set -euo pipefail`. Target macOS (Bash 3.2+) and Debian/Ubuntu.
 - No Bash 4-only features on macOS (no associative arrays, no `mapfile`). Indexed arrays are allowed.
 - Atomic file updates and safe directory swaps are first-class design constraints.
-- UX is minimal: clear status lines and summaries; interactive flows use `gum` only where already required by installers/uninstallers.
+- UX is excellent: clear status lines and summaries; `gum` is a core prerequisite used for interactive flows. The installer does not install prerequisites; ensure Homebrew and `gum` are installed before running it.
 - The meta CLI is always installed and self-updatable. Tools can be installed as binaries or as aliases in the user’s RC file.
 
 ---
@@ -77,7 +77,7 @@ High-level flow:
 1) Detect OS: macOS vs Debian-like Linux; bail out on unsupported.
 2) Option parsing: `--all`, `--exp`, `--names <csv>` allow non-interactive flows and experimental tool inclusion.
 3) Load registry `setup/registry.tsv` and filter tools by OS (and stability unless `--exp`).
-4) Interactive selection via `gum` (unless `--all` or `--names`). On Linux, the installer ensures Homebrew is available: it uses the official script when sudo works (prefers non‑interactive; with a TTY may prompt once), otherwise performs a user‑local install at `~/.linuxbrew`; then it installs `gum`.
+4) Prerequisites: `brew` and `gum` must be installed by the user prior to running the installer. The installer checks and exits with instructions if missing.
 5) For each selected tool:
    - Try to install a binary into `$(resolve_target_dir)`.
    - If the target dir is not writable, or copy fails: fall back to an alias in the user RC file (`~/.bashrc` or `~/.zshrc`).
@@ -104,7 +104,7 @@ Command: `bash-zoo uninstall [--all]`
 Flow (scripts/bash-zoo.sh):
 
 1) Build candidate list from known tools and detect presence as binaries and/or aliases in `~/.bashrc` and `~/.zshrc`.
-2) Interactive selection via `gum` unless `--all`. On Linux, the CLI ensures Homebrew exists (system prefix with sudo, or user‑local at `~/.linuxbrew`) and installs `gum` if needed.
+2) Interactive selection via `gum` unless `--all`. Prerequisite: `gum` must already be installed and in PATH.
 3) Apply removals:
    - Binaries: `rm -f` from the target bin directory.
    - Aliases: remove matching lines from RC files (portable `sed` handling for GNU/BSD).
@@ -290,7 +290,7 @@ write_installed_metadata_update(version=src_version, commit, repo_url, names...)
 - Keep uninstall in the meta CLI to function without the repo.
 - Use `cmp -s` for per-file update decisions to reduce system churn.
 - Track only repo-level version; combine with commit ancestry for safe forward-only gating.
-- Keep UI minimal; interactivity exists for install/uninstall flows where user choices matter.
+- Keep UI excellent; interactivity exists for install/uninstall flows where user choices matter.
 
 ---
 
