@@ -173,8 +173,9 @@ add_or_replace_entry() {
 parse_configs() {
   # Requires CONFIG_FILES[]
   NAMES=(); HOSTS=(); USERS=(); PORTS=(); KEYS=(); PATTERNS=()
-  local file dir line key lowkey val cur_names cur_host cur_user cur_port cur_key
-  for file in "${CONFIG_FILES[@]}"; do
+  local file dir line key lowkey val cur_names cur_host cur_user cur_port cur_key idx
+  for idx in "${!CONFIG_FILES[@]}"; do
+    file="${CONFIG_FILES[$idx]}"
     dir=$(dirname "$file")
     # Reset stanza vars when starting a new file
     cur_names=""; cur_host=""; cur_user=""; cur_port=""; cur_key=""
