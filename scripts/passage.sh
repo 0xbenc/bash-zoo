@@ -20,7 +20,7 @@ BOLD=""; DIM=""; FG_BLUE=""; FG_GREEN=""; FG_YELLOW=""; FG_MAGENTA=""; FG_RED=""
 if [[ -t 1 ]] && command -v tput >/dev/null 2>&1; then
   colors="$(tput colors 2>/dev/null || printf '0')"
   if [[ "$colors" =~ ^[0-9]+$ ]] && [[ "$colors" -ge 8 ]]; then
-    BOLD="$(tput bold 2>/dev/null || printf '')"
+    BOLD="$(tput setaf 2 bold 2>/dev/null || printf '')"
     DIM="$(tput dim 2>/dev/null || printf '')"
     FG_BLUE="$(tput setaf 4 2>/dev/null || printf '')"
     FG_GREEN="$(tput setaf 2 2>/dev/null || printf '')"
@@ -671,9 +671,9 @@ main_loop() {
 
     local header
     if (( MFA_ONLY )); then
-      header="$(printf '%spassage%s /searchTerm filter | # select | b back | q quit' "$BOLD$FG_CYAN" "$RESET")"
+      header="${BOLD}${FG_CYAN}passage${RESET} ${BOLD}/searchTerm${RESET} filter | ${BOLD}#${RESET} select | ${BOLD}b${RESET} back | ${BOLD}q${RESET} quit"
     else
-      header="$(printf '%spassage%s /searchTerm filter | # (number) select | c#/#c copy | r# reveal | t# otp | p# pin | m MFA-mode | x clear | o options | q quit' "$BOLD$FG_CYAN" "$RESET")"
+      header="${BOLD}${FG_CYAN}passage${RESET} ${BOLD}/searchTerm${RESET} filter | ${BOLD}# (number)${RESET} select | ${BOLD}c#/#c${RESET} copy | ${BOLD}r#${RESET} reveal | ${BOLD}t#${RESET} otp | ${BOLD}p#${RESET} pin | ${BOLD}m${RESET} MFA-mode | ${BOLD}x${RESET} clear | ${BOLD}o${RESET} options | ${BOLD}q${RESET} quit"
     fi
 
     gum style \
