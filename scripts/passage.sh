@@ -793,6 +793,16 @@ main_loop() {
   done
 }
 
-main() { require_deps; state_load; main_loop; }
+main() {
+  require_deps
+  state_load
+
+  # If invoked as `passage mfa`, start directly in MFA-only mode.
+  if [[ ${1-} == "mfa" || ${1-} == "MFA" ]]; then
+    MFA_ONLY=1
+  fi
+
+  main_loop
+}
 
 main "$@"

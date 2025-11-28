@@ -158,6 +158,7 @@ Security note: `mfa` never passes your secret as a command argument. It reads th
 - Copy the password (first line) directly.
 - Reveal the password on screen until you clear it (also copies to clipboard).
 - Toggle pin on an entry; pinned entries sort first.
+- Start directly in MFA-only view with `passage mfa`.
 
 Notes
 - Requires `pass` and a clipboard adapter (`pbcopy`, `wl-copy`, `xclip`, or `xsel`). For TOTP actions, install `oathtool`.
