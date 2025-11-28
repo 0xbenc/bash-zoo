@@ -120,6 +120,7 @@ KEYS=()
 PATTERNS=()  # 0/1
 # UI labels and helpers
 ADD_ROW_LABEL="➕ Add new alias…"
+JUMP_ROW_LABEL="🧭 Jump via intermediate hops…"
 style_step() { gum style --bold --foreground 212 "$1" 2>/dev/null || printf '%s\n' "$1"; }
 style_hint() { gum style --faint "$1" 2>/dev/null || printf '%s\n' "$1"; }
 clear_screen() {
@@ -234,6 +235,8 @@ build_alias_lines() {
   LINES=()
   # Synthetic Add row first so it appears before other options
   LINES+=("ADD"$'\t'"$ADD_ROW_LABEL")
+   # Jump mode row, placed after ADD and before aliases
+  LINES+=("JUMP"$'\t'"$JUMP_ROW_LABEL")
   local i name host user port key ispat info
   for i in "${!NAMES[@]}"; do
     name="${NAMES[$i]}"; host="${HOSTS[$i]}"; user="${USERS[$i]}"; port="${PORTS[$i]}"; key="${KEYS[$i]}"; ispat="${PATTERNS[$i]}"
@@ -438,6 +441,191 @@ ssherpa_add_flow() {
   alt_screen_off
 }
 
+ssherpa_jump_flow() {
+  # args: include_patterns filter_user prefilter no_color do_print do_exec ssh_args...
+  local include_patterns="$1" filter_user="$2" prefilter="$3" no_color="$4" do_print="$5" do_exec="$6"
+  shift 6
+  local jump_ssh_args=("$@")
+
+  alt_screen_on
+  clear_screen
+
+  # Build a fresh alias list with current filters, then drop synthetic rows.
+  build_alias_lines "$include_patterns" "$filter_user" "$prefilter" "$no_color"
+  local alias_lines=() l token
+  for l in "${LINES[@]:-}"; do
+    token=$(printf '%s' "$l" | awk -F '\t' '{print $1}')
+    case "$token" in
+      ADD|JUMP) continue ;;
+    esac
+    alias_lines+=("$l")
+  done
+
+  if [[ ${#alias_lines[@]} -eq 0 ]]; then
+    alt_screen_off
+    echo "[skipped] no aliases available for jump"
+    return 0
+  fi
+
+  # Step 1: pick destination
+  local dest_line dest_token dest_display
+  while true; do
+    clear_screen
+    style_step "Jump mode — destination"
+    draw_rule
+    style_hint "Pick the final destination host."
+    dest_line=$(printf '%s\n' "${alias_lines[@]}" | gum filter --placeholder "Filter destination…" --header "Jump mode — destination" --limit 1) || {
+      alt_screen_off
+      echo "[skipped] jump cancelled (destination)"
+      return 0
+    }
+    [[ -n "$dest_line" ]] || continue
+    dest_token=$(printf '%s' "$dest_line" | awk -F '\t' '{print $1}')
+    dest_display=$(printf '%s' "$dest_line" | awk -F '\t' '{print $2}')
+    break
+  done
+
+  # Step 2: pick the first hop
+  local hops=()
+  local first_choices=() line
+  for line in "${alias_lines[@]}"; do
+    token=$(printf '%s' "$line" | awk -F '\t' '{print $1}')
+    [[ "$token" == "$dest_token" ]] && continue
+    first_choices+=("$line")
+  done
+
+  if [[ ${#first_choices[@]} -eq 0 ]]; then
+    alt_screen_off
+    echo "[skipped] not enough distinct hosts for a jump"
+    return 0
+  fi
+
+  local hop_line hop_token
+  while true; do
+    clear_screen
+    style_step "Jump mode — first hop"
+    draw_rule
+    style_hint "Pick the first hop before '$dest_token'."
+    hop_line=$(printf '%s\n' "${first_choices[@]}" | gum filter --placeholder "Filter first hop…" --header "Pick first hop" --limit 1) || {
+      alt_screen_off
+      echo "[skipped] jump cancelled (first hop)"
+      return 0
+    }
+    [[ -n "$hop_line" ]] || continue
+    hop_token=$(printf '%s' "$hop_line" | awk -F '\t' '{print $1}')
+    break
+  done
+  hops+=("$hop_token")
+
+  # Step 3: optionally add more hops, with ALL DONE as a top choice
+  while true; do
+    clear_screen
+    style_step "Jump mode — hops"
+    draw_rule
+    style_hint "Route so far:"
+    local path=""
+    local h
+    for h in "${hops[@]}"; do
+      if [[ -n "$path" ]]; then
+        path+=" → "
+      fi
+      path+="$h"
+    done
+    path+=" → $dest_token"
+    printf '%s\n' "$path"
+    draw_rule
+    style_hint "Pick another hop, or choose ALL DONE to connect."
+
+    # Choices for next hop: all aliases except destination + previously chosen hops.
+    local choices=()
+    for line in "${alias_lines[@]}"; do
+      token=$(printf '%s' "$line" | awk -F '\t' '{print $1}')
+      # Skip destination
+      if [[ "$token" == "$dest_token" ]]; then continue; fi
+      # Skip already chosen hops
+      local skip=0 h2
+      for h2 in "${hops[@]}"; do
+        if [[ "$h2" == "$token" ]]; then
+          skip=1
+          break
+        fi
+      done
+      [[ $skip -eq 1 ]] && continue
+      choices+=("$line")
+    done
+
+    local menu_lines=()
+    menu_lines+=("DONE"$'\t'"ALL DONE — connect using route above")
+    local c
+    for c in "${choices[@]}"; do
+      menu_lines+=("$c")
+    done
+
+    hop_line=$(printf '%s\n' "${menu_lines[@]}" | gum filter --placeholder "Filter hops or ALL DONE…" --header "Pick next hop or ALL DONE" --limit 1) || {
+      alt_screen_off
+      echo "[skipped] jump cancelled (additional hops)"
+      return 0
+    }
+    [[ -n "$hop_line" ]] || continue
+    hop_token=$(printf '%s' "$hop_line" | awk -F '\t' '{print $1}')
+    if [[ "$hop_token" == "DONE" ]]; then
+      break
+    fi
+    hops+=("$hop_token")
+  done
+
+  # Step 4: review and execute/print
+  clear_screen
+  style_step "Jump mode — review"
+  draw_rule
+  local summary=""
+  local h3
+  for h3 in "${hops[@]}"; do
+    if [[ -n "$summary" ]]; then
+      summary+=" → "
+    fi
+    summary+="$h3"
+  done
+  summary+=" → $dest_token"
+  printf 'Route: %s\n' "$summary"
+  draw_rule
+
+  # Build ProxyJump argument
+  local jump_arg=""
+  local first=1
+  for h3 in "${hops[@]}"; do
+    if [[ $first -eq 1 ]]; then
+      jump_arg="$h3"
+      first=0
+    else
+      jump_arg+=",$h3"
+    fi
+  done
+
+  if [[ "$do_print" -eq 1 ]]; then
+    alt_screen_off
+    if [[ -n "$jump_arg" ]]; then
+      echo "[print] ssh -J $jump_arg $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
+    else
+      echo "[print] ssh $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
+    fi
+    return 0
+  fi
+
+  if [[ "$do_exec" -eq 1 ]]; then
+    alt_screen_off
+    if [[ -n "$jump_arg" ]]; then
+      echo "[exec] ssh -J $jump_arg $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
+      exec ssh -J "$jump_arg" "$dest_token" "${jump_ssh_args[@]:-}"
+    else
+      echo "[exec] ssh $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
+      exec ssh "$dest_token" "${jump_ssh_args[@]:-}"
+    fi
+  fi
+
+  alt_screen_off
+}
+
 main() {
   local sub=""; [[ $# -gt 0 ]] && case "$1" in add) sub="$1"; shift ;; esac
   local include_patterns=0 do_print=0 do_exec=1 filter_user="" no_color=0 prefilter="" cfg_path="" ssh_args=()
@@ -581,6 +769,9 @@ EOF
   case "$token" in
     ADD)
       ssherpa_add_flow "" "" "" "" "" "${cfg_path:-}" 0 0
+      ;;
+    JUMP)
+      ssherpa_jump_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "$do_print" "$do_exec" "${ssh_args[@]:-}"
       ;;
     *)
       local alias
