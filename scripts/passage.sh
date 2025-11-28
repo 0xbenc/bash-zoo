@@ -541,19 +541,7 @@ perform_reveal() {
   reveal_until_clear "$(format_label "$path")" "$p"
 }
 
-perform_totp_copy() {
-  local path="$1" target otp pretty tool
-  target="$(mfa_target_for_path "$path")"
-  if [[ -z "$target" ]]; then msg_warn "No MFA entry found for '$path'."; return 0; fi
-  command -v oathtool >/dev/null 2>&1 || die "Missing dependency: oathtool"
-  if ! otp="$(mfa_generate_otp_from_pass "$target")"; then die "Failed to generate OTP for '$target'."; fi
-  pretty="$(format_otp "$otp")"
-  if clipboard_copy "$otp"; then tool="$CLIPBOARD_TOOL_LAST"; else tool=""; fi
-  state_touch "$path"; state_save
-  if [[ -n "$tool" ]]; then msg_ok "TOTP copied to clipboard ($tool)."; else msg_warn "No clipboard tool found."; fi
-}
-
-perform_totp_reveal() {
+perform_totp() {
   local path="$1" target otp pretty now modulo remaining
   target="$(mfa_target_for_path "$path")"
   if [[ -z "$target" ]]; then msg_warn "No MFA entry found for '$path'."; return 0; fi
@@ -562,6 +550,7 @@ perform_totp_reveal() {
   pretty="$(format_otp "$otp")"
   # Copy as a convenience, like reveal password
   if clipboard_copy "$otp"; then :; else :; fi
+  state_touch "$path"; state_save
   now=$(date +%s)
   modulo=$((now % TOTP_WINDOW))
   remaining=$((TOTP_WINDOW - modulo))
@@ -608,14 +597,13 @@ actions_menu_for() {
   printf '%sEntry:%s %s\n' "$BOLD$FG_MAGENTA" "$RESET" "$display"
   printf '%sPath:%s  %s\n' "$DIM" "$RESET" "$path"
   printf '%sPinned:%s %s   %sLast Used:%s %s\n' "$DIM" "$RESET" "$pin" "$DIM" "$RESET" "$used_h"
-  printf '\n%sActions:%s [c]opy  [r]eveal  [t]otp-copy  [T]otp-reveal  [p]in/unpin  [x] clear-clipboard  [o]ptions  [b]ack  [q]uit\n' "$BOLD" "$RESET"
+  printf '\n%sActions:%s [c]opy  [r]eveal  [t]otp  [p]in/unpin  [x] clear-clipboard  [o]ptions  [b]ack  [q]uit\n' "$BOLD" "$RESET"
   printf 'Select: '
   local act; read -r act || return 0
   case "$act" in
     c|'') perform_copy "$path" ;;
     r) perform_reveal "$path" ;;
-    t) perform_totp_copy "$path" ;;
-    T) perform_totp_reveal "$path" ;;
+    t) perform_totp "$path" ;;
     p) state_toggle_pin "$path"; state_save; msg_ok "Pin toggled." ;;
     x) clear_clipboard ;;
     o) options_menu ;;
@@ -661,7 +649,12 @@ main_loop() {
       die "No pass entries found under '$PASSWORD_STORE_DIR'."
     fi
 
-    printf '%s::%s /term filter | n select | cN/Nc copy | rN/Nr reveal | tN/Nt otp-copy | TN/NT otp-reveal | m toggle-mfa-view | pN/Np pin | x clear | o options | q quit\n' "$BOLD$FG_CYAN" "$RESET"
+    gum style \
+      --border rounded \
+      --margin "0 1" \
+      --padding "1 2" \
+      --width 75 \
+      "$(printf '%spassage%s /searchTerm filter | N(umber) select | cN/Nc copy | rN reveal | tN/Nt otp | pN pin | m toggle-mfa-view | x clear | o options | q quit' "$BOLD$FG_CYAN" "$RESET")"
     [[ -n "$filter" ]] && printf '%sFilter:%s %s\n' "$DIM" "$RESET" "$filter"
     (( MFA_ONLY )) && printf '%sView:%s MFA-only\n' "$DIM" "$RESET"
     print_listing
@@ -711,28 +704,14 @@ main_loop() {
       t[0-9]*)
         local n="${cmd#t}"
         if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
-          perform_totp_copy "${list_paths[$((n-1))]}"
+          perform_totp "${list_paths[$((n-1))]}"
         else
           msg_warn "Invalid index: $n"
         fi ;;
       [0-9]*t)
         local n="${cmd%t}"
         if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
-          perform_totp_copy "${list_paths[$((n-1))]}"
-        else
-          msg_warn "Invalid index: $n"
-        fi ;;
-      T[0-9]*)
-        local n="${cmd#T}"
-        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
-          perform_totp_reveal "${list_paths[$((n-1))]}"
-        else
-          msg_warn "Invalid index: $n"
-        fi ;;
-      [0-9]*T)
-        local n="${cmd%T}"
-        if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
-          perform_totp_reveal "${list_paths[$((n-1))]}"
+          perform_totp "${list_paths[$((n-1))]}"
         else
           msg_warn "Invalid index: $n"
         fi ;;

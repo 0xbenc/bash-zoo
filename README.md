@@ -161,12 +161,12 @@ Security note: `mfa` never passes your secret as a command argument. It reads th
 
 Notes
 - Requires `pass` and a clipboard adapter (`pbcopy`, `wl-copy`, `xclip`, or `xsel`). For TOTP actions, install `oathtool`.
-- Built‑in TOTP: entries ending in `/mfa` (or with a sibling `…/mfa`) expose OTP actions. Use `tN`/`Nt` to copy and `TN`/`NT` to reveal the current code. Press `m` to toggle an MFA‑only view.
+- Built‑in TOTP: entries ending in `/mfa` (or with a sibling `…/mfa`) expose OTP actions. Use `tN`/`Nt` to show the current code (also copies). Press `m` to toggle an MFA‑only view.
 - Power users: `mfa` still provides a fuzzy TOTP picker with optional big‑font output.
 - Safe defaults: no secrets printed unless you choose Reveal.
 - Commands:
   - Type a number to select an entry; then choose an action (Enter copies by default).
-  - `cN` or `Nc` copy entry `N`. `rN` or `Nr` reveal entry `N` (also copies). `tN` or `Nt` copy a TOTP for entry `N` when available. `TN` or `NT` reveal a TOTP (also copies). `pN` or `Np` pin/unpin entry `N`.
+  - `cN` or `Nc` copy entry `N`. `rN` or `Nr` reveal entry `N` (also copies). `tN` or `Nt` show a TOTP for entry `N` when available (also copies). `pN` or `Np` pin/unpin entry `N`.
   - `m` toggles an MFA‑only view (shows only entries with `/mfa`).
   - `/term` filter list by substring; empty filter shows all again.
   - `O` via Options menu clears pins; `R` via Options menu clears recents.
