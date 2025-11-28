@@ -232,6 +232,8 @@ build_alias_lines() {
   # Build lines with a real tab between alias token and display.
   local include_patterns="$1" filter_user="$2" prefilter="$3" no_color="$4"
   LINES=()
+  # Synthetic Add row first so it appears before other options
+  LINES+=("ADD"$'\t'"$ADD_ROW_LABEL")
   local i name host user port key ispat info
   for i in "${!NAMES[@]}"; do
     name="${NAMES[$i]}"; host="${HOSTS[$i]}"; user="${USERS[$i]}"; port="${PORTS[$i]}"; key="${KEYS[$i]}"; ispat="${PATTERNS[$i]}"
@@ -250,8 +252,6 @@ build_alias_lines() {
     [[ -z "$info" ]] && info="(no HostName in config)"
     LINES+=("$name"$'\t'"$info")
   done
-  # Synthetic Add row
-  LINES+=("ADD"$'\t'"$ADD_ROW_LABEL")
   # Prefilter by substring
   if [[ -n "$prefilter" ]]; then
     local tmp=() l
@@ -567,7 +567,7 @@ EOF
 
   # Show via gum filter
   local chosen
-  chosen=$(printf '%s\n' "${LINES[@]}" | gum filter --placeholder "Filter SSH aliases…" --header "Pick an SSH alias — Enter to connect — type to filter" --limit 1)
+  chosen=$(printf '%s\n' "${LINES[@]}" | gum filter --placeholder "Filter SSH aliases…" --header "Pick an SSH alias, choose JUMP or ADD" --limit 1)
   if [[ -z "$chosen" ]]; then
     echo "[skipped] no selection made"
     exit 0
