@@ -21,6 +21,7 @@ bash-zoo — meta CLI
 Usage:
   bash-zoo help
   bash-zoo version
+  bash-zoo list
   bash-zoo uninstall [--all]
   bash-zoo update passwords
   bash-zoo update zoo [--from PATH] [--repo URL] [--branch BR] [--dry-run] [--force] [--no-meta]
@@ -28,6 +29,7 @@ Usage:
 Commands:
   help                 Show this help.
   version              Print the installed bash-zoo version.
+  list                 Show version plus installed tools.
   uninstall [--all]    Remove installed tools and aliases. Use --all to skip prompts.
   update passwords     Pull latest for each subfolder in ~/.password-store.
   update zoo           Refresh installed tools and the meta CLI from source.
@@ -567,7 +569,7 @@ ensure_gum() {
 }
 
 known_tools() {
-  # Keep in sync with scripts/*.sh (not including this file)
+  # Keep in sync with installable scripts (plus retired tools for cleanup)
   printf '%s\n' \
     forgit \
     gpgobble \
@@ -630,6 +632,55 @@ print_version() {
     label="$short"
   fi
   printf 'version: %s\n' "${label:-unknown}"
+}
+
+list_cmd() {
+  # First line: same output as `bash-zoo version`
+  print_version
+
+  # Prefer installed.json metadata; fall back to discovery.
+  read_installed_metadata
+  local -a names
+  names=()
+  local seen="" n
+
+  for n in "${INST_LIST[@]:-}"; do
+    if [[ -z "$n" ]]; then
+      continue
+    fi
+    case ",$seen," in
+      *",$n,"*) ;;
+      *) names+=("$n"); seen="$seen,$n" ;;
+    esac
+  done
+
+  if [[ ${#names[@]} -eq 0 ]]; then
+    while IFS= read -r n; do
+      if [[ -z "$n" ]]; then
+        continue
+      fi
+      case ",$seen," in
+        *",$n,"*) ;;
+        *) names+=("$n"); seen="$seen,$n" ;;
+      esac
+    done < <(discover_installed_tools)
+  fi
+
+  if [[ ${#names[@]} -eq 0 ]]; then
+    echo "installed tools: (none)"
+    return 0
+  fi
+
+  local first=1 out=""
+  for n in "${names[@]}"; do
+    if [[ $first -eq 1 ]]; then
+      out="$n"
+      first=0
+    else
+      out="$out, $n"
+    fi
+  done
+  printf 'installed tools: %s\n' "$out"
 }
 
 uninstall_cmd() {
@@ -871,6 +922,7 @@ main() {
   case "$cmd" in
     help|-h|--help) print_usage ;;
     version)        print_version ;;
+    list)           list_cmd ;;
     uninstall)      shift; uninstall_cmd "${1-}" ;;
     update)
       shift

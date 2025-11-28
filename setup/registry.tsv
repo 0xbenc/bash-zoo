@@ -1,7 +1,6 @@
 # script	oses	has_deps	desc
 # oses: comma-separated from {debian,macos}
 # has_deps: yes => run setup/$os/$script.sh, no => chmod + alias only
-mfa	debian,macos	yes	Terminal MFA (TOTP) helper for GNU Pass
 uuid	debian	yes	Generate a UUID and copy it to the clipboard
 zapp	debian	no	Launch apps easily
 zapper	debian	no	Install apps easily

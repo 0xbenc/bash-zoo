@@ -37,7 +37,6 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
   - [gpgobble](#gpgobble)
   - [killport](#killport)
   - [ssherpa](#ssherpa)
-  - [mfa](#mfa)
   - [passage](#passage)
   - [uuid](#uuid)
   - [zapp](#zapp)
@@ -66,8 +65,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 | `gpgobble` | ✅ stable | Bulk‑import public keys and set ownertrust to FULL (4) for non‑local keys | macOS, Debian/Ubuntu | `gnupg` |
 | `killport` | ✅ stable | Free a TCP/UDP port with gum selection, TERM→KILL, and wait | macOS, Debian/Ubuntu | `lsof` (Linux optionally `iproute2` for `ss`) |
 | `ssherpa` | ✅ stable | Alias-first SSH host picker + interactive config writer | macOS, Debian/Ubuntu | none (gum UI only) |
-| `mfa` | ✅ stable | Generate TOTP codes from `pass` and copy them to your clipboard | macOS, Debian/Ubuntu | `pass`, `oathtool`, `fzf`, clipboard tool (`pbcopy`/`xclip`/`xsel`), optional `figlet` |
-| `passage` | ✅ stable | Interactive GNU Pass browser with pins and MRU; copy or reveal password | macOS, Debian/Ubuntu | `pass`, platform clipboard utility |
+| `passage` | ✅ stable | Interactive GNU Pass browser with pins and MRU; copy or reveal password; built‑in TOTP (MFA) helpers | macOS, Debian/Ubuntu | `pass`, `oathtool`, platform clipboard utility |
 | `uuid` | ✅ stable | Create and copy a fresh UUID without leaving the terminal | macOS, Debian/Ubuntu | `uuidgen` (or Python 3), clipboard tool (`pbcopy`/`xclip`/`xsel`) |
 | `zapp` | ✅ stable | Launch an AppImage or unpacked app stored under `~/zapps` | Debian/Ubuntu | none |
 | `zapper` | ✅ stable | Prepare, validate, and register new apps for `zapp` with desktop entries | Debian/Ubuntu | `desktop-file-utils` |
@@ -112,8 +110,6 @@ Notes
 - gum-only UI. On Linux, prefers `ss` if available; otherwise uses `lsof`.
 - Safe defaults: TERM → optional KILL after 3s; wait up to 5s for the port to free; never sudo.
 
-### mfa
-
 ### ssherpa
 
 `ssherpa` scans your `~/.ssh/config` and any `Include`d files, lists your Host entries, and lets you fuzzy-pick one with gum to connect. By default it hides pattern hosts (those with `*` or `?`), but you can include them with `--all`. It also includes an interactive “Add new alias…” flow to create or update Host stanzas in your config (atomic write, no sudo).
@@ -131,11 +127,11 @@ Notes
 - Gum-only UI; no fzf. It parses `Host`, `HostName`, `User`, `Port`, and first `IdentityFile`. `Match` blocks are ignored.
 - Labels show `user@host:port [key]` when present; connection is always `ssh <alias>` so your config fully applies.
 
-`mfa` pulls TOTP codes from your [`pass`](https://www.passwordstore.org/) store, copies them to the clipboard, and shows a countdown until the next code rotation. It features fuzzy search (via `fzf`), optional big‑font display (`figlet`), and smart key‑bindings for quick selection. To make it work you need:
+Passage’s built‑in TOTP support uses the same `/mfa` convention as the former `mfa` helper. To make MFA work smoothly you need:
 
 1. **Dependencies** — Install `pass`, `oathtool`, and your platform clipboard helper (`pbcopy` on macOS, `xclip`/`xsel` on Debian).
 2. **Initialize pass** — Generate (or reuse) a GPG key, then run `pass init <gpg-id>`. This creates `~/.password-store` as your encrypted vault.
-3. **Store MFA secrets** — Create an entry for each service that ends in `/mfa`, because the script searches for files named `mfa.gpg`. The entry must contain a single-line base32 secret (no URIs, no extra lines). For example:
+3. **Store MFA secrets** — Create an entry for each service that ends in `/mfa`. The entry must contain a single-line base32 secret (no URIs, no extra lines). For example:
 
    ```bash
    export PASSWORD_STORE_DIR=~/.password-store  # optional if using the default
@@ -143,11 +139,11 @@ Notes
    ```
 
    Paste the raw base32 TOTP secret when prompted (single line). The file lands at `~/.password-store/work/github/mfa.gpg`.
-4. **Sync across devices (optional)** — If you use git to sync your password store, commit the new entry so other machines running `mfa` can see it. The script respects `PASSWORD_STORE_DIR` if you keep the store somewhere else.
+4. **Sync across devices (optional)** — If you use git to sync your password store, commit the new entry so other machines can see it. Passage respects `PASSWORD_STORE_DIR` if you keep the store somewhere else.
 
-Once the store contains at least one `*/mfa` entry, run `mfa`, fuzzy-search the account, and the current 6-digit code lands in your clipboard. The countdown banner helps you see how long the code remains valid.
+Once the store contains at least one `*/mfa` entry, run `passage mfa` to start directly in an MFA-only view, fuzzy-search the account, and copy the current 6‑digit code.
 
-Security note: `mfa` never passes your secret as a command argument. It reads the single-line secret from `pass` and feeds it to `oathtool` via stdin to avoid exposure in process listings.
+Security note: Passage never passes your secret as a command argument. It reads the single-line secret from `pass` and feeds it to `oathtool` via stdin to avoid exposure in process listings.
 
 > All setup scripts live in `setup/<os>/<script>.sh` and match the script names one-to-one.
 
@@ -163,7 +159,6 @@ Security note: `mfa` never passes your secret as a command argument. It reads th
 Notes
 - Requires `pass` and a clipboard adapter (`pbcopy`, `wl-copy`, `xclip`, or `xsel`). For TOTP actions, install `oathtool`.
 - Built‑in TOTP: entries ending in `/mfa` (or with a sibling `…/mfa`) expose OTP actions. Use `tN`/`Nt` to show the current code (also copies). Press `m` to toggle an MFA‑only view.
-- Power users: `mfa` still provides a fuzzy TOTP picker with optional big‑font output.
 - Safe defaults: no secrets printed unless you choose Reveal.
 - Commands:
   - Type a number to select an entry; then choose an action (Enter copies by default).
@@ -245,7 +240,7 @@ cd bash-zoo
 - Shows which tools need additional packages before enabling
 - Groups complementary tools (like the `zapps` pair) for easy onboarding
 - Stores aliases so the commands travel with every new shell session
-- By default shows only stable tools (`uuid`, `mfa`, `forgit`, `gpgobble`, and `zapp`/`zapper`).
+- By default shows only stable tools (`uuid`, `forgit`, `gpgobble`, and `zapp`/`zapper`).
 - Include experimental tools by adding `--exp` (e.g., `./install.sh --exp`).
 - Skip prompts with `./install.sh --all` (respects `--exp` filtering).
 - Interactive picker also includes an "All" option to select everything.
@@ -268,7 +263,6 @@ cd bash-zoo
  
 | `forgit` | ✅ | ✅ |
 | `gpgobble` | ✅ | ✅ |
-| `mfa` | ✅ | ✅ |
 | `passage` | ✅ | ✅ |
  
 | `uuid` | ✅ | ✅ |
@@ -285,7 +279,7 @@ Notes:
 After installation, reload your shell (`exec "$SHELL" -l`) or open a fresh terminal. The commands are now global:
 
 ```bash
-mfa work/email        # Copy a TOTP token from pass
+passage mfa           # Start in MFA-only view for TOTP codes
 forgit                # Audit every git repo under the current directory
 uuid                  # Generate + copy a v4 UUID
 zapper ~/Downloads/Foo.AppImage   # Prepare a new app for zapp

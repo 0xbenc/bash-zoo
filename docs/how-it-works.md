@@ -21,10 +21,11 @@ The goal is to speed up contributions, debugging, and safe automation by conveyi
 - `install.sh` — Interactive installer and alias configurator. Detects OS, provisions binaries or aliases, embeds version/repo URL into the meta CLI (falling back to the canonical URL when no git remote is found), and writes `installed.json`.
 - `scripts/bash-zoo.sh` — Meta CLI that provides:
   - `version` — prints `version: <label>` where `<label>` is the short commit hash or a dev label (e.g., `Local - Uncommitted`, `Local - <hash> (pushed)`).
+  - `list` — prints the version label, then a summary line of tools installed via bash-zoo.
   - `uninstall [--all]` — remove installed tools/aliases (with interactive selection via `gum` unless `--all`)
   - `update passwords` — per-folder `git` pull under `~/.password-store`
   - `update zoo` — refresh installed tools and the meta CLI (self-update)
-- `scripts/*.sh` — User-facing tools (e.g., `mfa.sh`, `uuid.sh`, `zapp.sh`, `zapper.sh`, `forgit.sh`, `gpgobble.sh`, `passage.sh`, `killport.sh`, `ssherpa.sh`).
+- `scripts/*.sh` — User-facing tools (e.g., `uuid.sh`, `zapp.sh`, `zapper.sh`, `forgit.sh`, `gpgobble.sh`, `passage.sh`, `killport.sh`, `ssherpa.sh`).
 - `setup/<os>/<tool>.sh` — Per-tool setup helpers for Debian/macOS.
 - `docs/update-zoo.md` — High-level self-update design (kept aligned with the code).
 - `docs/how-it-works.md` — This document.
@@ -297,7 +298,7 @@ write_installed_metadata_update(version=src_version, commit, repo_url, names...)
 ## Test Recipes (Quick)
 
 - Install/update cycle:
-  - `./install.sh --names uuid,mfa,forgit`
+  - `./install.sh --names uuid,forgit`
   - `bash-zoo update zoo --from ./ --dry-run`
   - `bash-zoo update zoo --from ./`
 - Passwords update:

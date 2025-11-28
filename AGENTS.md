@@ -3,7 +3,7 @@
 > Agents: before making non-trivial changes, read `docs/how-it-works.md` for an architecture and workflow overview (install, uninstall, self-update, metadata, portability, atomicity). Treat it as required onboarding.
 
 ## Project Structure & Modules
-- `scripts/`: User-facing tools (`mfa.sh`, `uuid.sh`, `zapper.sh`, `zapp.sh`).
+- `scripts/`: User-facing tools (`uuid.sh`, `zapper.sh`, `zapp.sh`, `passage.sh`).
 - `setup/`: Per-OS setup scripts named after each script.
   - `setup/debian/*.sh` (apt-based)
   - `setup/macos/*.sh` (Homebrew)
@@ -13,7 +13,7 @@
 
 ## Coding Style & Naming
 - Shell: Bash with `set -euo pipefail`; prefer portable constructs.
-- macOS-only code must avoid Bash 4 features (no associative arrays, no `mapfile`). See `scripts/mfa.sh`.
+- macOS-only code must avoid Bash 4 features (no associative arrays, no `mapfile`). See `scripts/passage.sh`.
 - Filenames: lowercase-kebab, suffix `.sh` (matches setup scripts by name).
 - Indentation: 2 spaces; wrap long pipelines; quote variables; prefer `$(...)` over backticks.
 - Functions/vars: `lower_snake_case`; constants in all caps.
