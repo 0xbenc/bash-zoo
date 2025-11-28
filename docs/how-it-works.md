@@ -11,7 +11,7 @@ The goal is to speed up contributions, debugging, and safe automation by conveyi
 - Shell: Bash with `set -euo pipefail`. Target macOS (Bash 3.2+) and Debian/Ubuntu.
 - No Bash 4-only features on macOS (no associative arrays, no `mapfile`). Indexed arrays are allowed.
 - Atomic file updates and safe directory swaps are first-class design constraints.
-- UX is excellent: clear status lines and summaries; `gum` is a core prerequisite used for interactive flows. The installer does not install prerequisites; ensure Homebrew and `gum` are installed before running it.
+- UX is excellent: clear status lines and summaries; `gum` is a core prerequisite used for interactive flows and `figlet` powers large-code TOTP displays. The installer does not install prerequisites; ensure Homebrew, `gum`, and `figlet` are installed before running it.
 - The meta CLI is always installed and self-updatable. Tools can be installed as binaries or as aliases in the user’s RC file.
 
 ---
@@ -77,7 +77,7 @@ High-level flow:
 1) Detect OS: macOS vs Debian-like Linux; bail out on unsupported.
 2) Option parsing: `--all`, `--exp`, `--names <csv>` allow non-interactive flows and experimental tool inclusion.
 3) Load registry `setup/registry.tsv` and filter tools by OS (and stability unless `--exp`).
-4) Prerequisites: `brew` and `gum` must be installed by the user prior to running the installer. The installer checks and exits with instructions if missing.
+4) Prerequisites: `brew`, `gum`, and `figlet` must be installed by the user prior to running the installer. The installer checks and exits with instructions if missing.
 5) For each selected tool:
    - Try to install a binary into `$(resolve_target_dir)`.
    - If the target dir is not writable, or copy fails: fall back to an alias in the user RC file (`~/.bashrc` or `~/.zshrc`).

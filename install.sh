@@ -307,9 +307,9 @@ if [[ "$OS_TYPE" == "other" ]]; then
     exit 0
 fi
 
-# Prerequisites check (brew + gum)
+# Prerequisites check (brew + gum + figlet)
 require_prereqs_or_exit() {
-  local missing=0 brew_missing=0 gum_missing=0
+  local missing=0 brew_missing=0 gum_missing=0 figlet_missing=0
   if ! command -v brew >/dev/null 2>&1; then
     echo "Error: Homebrew (brew) is not in PATH." >&2
     missing=1; brew_missing=1
@@ -317,6 +317,10 @@ require_prereqs_or_exit() {
   if ! command -v gum >/dev/null 2>&1; then
     echo "Error: gum is not installed." >&2
     missing=1; gum_missing=1
+  fi
+  if ! command -v figlet >/dev/null 2>&1; then
+    echo "Error: figlet is not installed." >&2
+    missing=1; figlet_missing=1
   fi
   if [[ $missing -eq 0 ]]; then
     return 0
@@ -329,10 +333,13 @@ require_prereqs_or_exit() {
   if [[ $gum_missing -eq 1 ]]; then
     echo '  brew install gum' >&2
   fi
+  if [[ $figlet_missing -eq 1 ]]; then
+    echo '  brew install figlet' >&2
+  fi
   exit 1
 }
 
-# Prerequisites (brew + gum) are required for all modes
+# Prerequisites (brew + gum + figlet) are required for all modes
 require_prereqs_or_exit
 
 # Play rotating ASCII animation once before showing selector

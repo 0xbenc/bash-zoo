@@ -38,6 +38,16 @@ fi
 
 die() { printf '%s%sError:%s %s\n' "$FG_RED" "$BOLD" "$RESET" "$1" >&2; exit 1; }
 
+screen_clear() {
+  if [[ -t 1 ]]; then
+    if command -v tput >/dev/null 2>&1; then
+      tput clear
+    else
+      printf '\033[2J\033[H'
+    fi
+  fi
+}
+
 # Ensure gpg pinentry can attach to this terminal session on first decrypt.
 # This prevents silent failures when gpg-agent needs to prompt but has no TTY.
 if [[ -t 0 ]]; then
@@ -223,12 +233,12 @@ msg_warn() { printf '%s%sWarn:%s %s\n' "$FG_YELLOW" "$BOLD" "$RESET" "$1" >&2; }
 
 reveal_until_clear() {
   local title="$1" secret="$2"
-  if command -v tput >/dev/null 2>&1; then tput clear; else printf '\033[2J\033[H'; fi
+  screen_clear
   printf '%s%sReveal:%s %s\n\n' "$BOLD" "$FG_MAGENTA" "$RESET" "$title"
   printf '%s%s%s\n\n' "$BOLD" "$FG_CYAN" "$secret" "$RESET"
   printf '%sPress Enter to clear...%s\n' "$DIM" "$RESET"
   read -r -s _
-  if command -v tput >/dev/null 2>&1; then tput clear; else printf '\033[2J\033[H'; fi
+  screen_clear
 }
 
 # Determine whether a given pass entry has an MFA secret.
@@ -555,13 +565,22 @@ perform_totp() {
   modulo=$((now % TOTP_WINDOW))
   remaining=$((TOTP_WINDOW - modulo))
   (( remaining == 0 )) && remaining=$TOTP_WINDOW
-  if command -v tput >/dev/null 2>&1; then tput clear; else printf '\033[2J\033[H'; fi
+  screen_clear
   printf '%s%sReveal TOTP:%s %s\n\n' "$BOLD" "$FG_MAGENTA" "$RESET" "$(format_label "$path")"
-  printf '%s%s%s\n\n' "$BOLD" "$FG_CYAN" "$pretty" "$RESET"
+  if command -v figlet >/dev/null 2>&1; then
+    local figlet_text
+    figlet_text="$(printf '%s' "$pretty" | sed 's/ /  /g')"
+    printf '%s' "$FG_CYAN"
+    figlet "$figlet_text"
+    printf '%s\n' "$RESET"
+  else
+    printf '%s%s%s\n' "$BOLD" "$FG_CYAN" "$pretty" "$RESET"
+  fi
+  printf '\n'
   render_progress "$remaining" "$TOTP_WINDOW"
   printf '\n%sPress Enter to clear...%s\n' "$DIM" "$RESET"
   read -r -s _
-  if command -v tput >/dev/null 2>&1; then tput clear; else printf '\033[2J\033[H'; fi
+  screen_clear
 }
 
 clear_clipboard() {
@@ -608,7 +627,7 @@ actions_menu_for() {
     x) clear_clipboard ;;
     o) options_menu ;;
     b) : ;;
-    q) exit 0 ;;
+    q) screen_clear; exit 0 ;;
   esac
 }
 
@@ -636,6 +655,7 @@ apply_mfa_only_filter() {
 main_loop() {
   local filter=""
   while true; do
+    screen_clear
     load_listing_arrays "$filter"
     if (( MFA_ONLY )); then
       apply_mfa_only_filter
@@ -649,12 +669,19 @@ main_loop() {
       die "No pass entries found under '$PASSWORD_STORE_DIR'."
     fi
 
+    local header
+    if (( MFA_ONLY )); then
+      header="$(printf '%spassage%s /searchTerm filter | # select | b back | q quit' "$BOLD$FG_CYAN" "$RESET")"
+    else
+      header="$(printf '%spassage%s /searchTerm filter | # (number) select | c#/#c copy | r# reveal | t# otp | p# pin | m MFA-mode | x clear | o options | q quit' "$BOLD$FG_CYAN" "$RESET")"
+    fi
+
     gum style \
       --border rounded \
       --margin "0 1" \
       --padding "1 2" \
       --width 75 \
-      "$(printf '%spassage%s /searchTerm filter | N(umber) select | cN/Nc copy | rN reveal | tN/Nt otp | pN pin | m toggle-mfa-view | x clear | o options | q quit' "$BOLD$FG_CYAN" "$RESET")"
+      "$header"
     [[ -n "$filter" ]] && printf '%sFilter:%s %s\n' "$DIM" "$RESET" "$filter"
     (( MFA_ONLY )) && printf '%sView:%s MFA-only\n' "$DIM" "$RESET"
     print_listing
@@ -668,7 +695,8 @@ main_loop() {
     fi
 
     case "$cmd" in
-      q|quit|exit) printf '%sExiting.%s\n' "$DIM" "$RESET"; break ;;
+      q|quit|exit) screen_clear; printf '%sExiting Passage.%s\n' "$DIM" "$RESET"; break ;;
+      b) MFA_ONLY=0 ;;
       o) options_menu ;;
       m) if (( MFA_ONLY )); then MFA_ONLY=0; else MFA_ONLY=1; fi ;;
       x) clear_clipboard ;;
@@ -676,28 +704,44 @@ main_loop() {
       r[0-9]*)
         local n="${cmd#r}"
         if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
-          perform_reveal "${list_paths[$((n-1))]}"
+          if (( MFA_ONLY )); then
+            perform_totp "${list_paths[$((n-1))]}"
+          else
+            perform_reveal "${list_paths[$((n-1))]}"
+          fi
         else
           msg_warn "Invalid index: $n"
         fi ;;
       [0-9]*r)
         local n="${cmd%r}"
         if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
-          perform_reveal "${list_paths[$((n-1))]}"
+          if (( MFA_ONLY )); then
+            perform_totp "${list_paths[$((n-1))]}"
+          else
+            perform_reveal "${list_paths[$((n-1))]}"
+          fi
         else
           msg_warn "Invalid index: $n"
         fi ;;
       c[0-9]*)
         local n="${cmd#c}"
         if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
-          perform_copy "${list_paths[$((n-1))]}"
+          if (( MFA_ONLY )); then
+            perform_totp "${list_paths[$((n-1))]}"
+          else
+            perform_copy "${list_paths[$((n-1))]}"
+          fi
         else
           msg_warn "Invalid index: $n"
         fi ;;
       [0-9]*c)
         local n="${cmd%c}"
         if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
-          perform_copy "${list_paths[$((n-1))]}"
+          if (( MFA_ONLY )); then
+            perform_totp "${list_paths[$((n-1))]}"
+          else
+            perform_copy "${list_paths[$((n-1))]}"
+          fi
         else
           msg_warn "Invalid index: $n"
         fi ;;
@@ -732,8 +776,12 @@ main_loop() {
       [0-9]*)
         local n="$cmd"
         if [[ "$n" =~ ^[0-9]+$ ]] && (( n>=1 && n<=${#list_paths[@]} )); then
-          # Show actions menu for this selection; default Enter copies
-          actions_menu_for $((n-1))
+          if (( MFA_ONLY )); then
+            perform_totp "${list_paths[$((n-1))]}"
+          else
+            # Show actions menu for this selection; default Enter copies
+            actions_menu_for $((n-1))
+          fi
         else
           msg_warn "Invalid index: $n"
         fi ;;

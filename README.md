@@ -221,14 +221,16 @@ What it does:
 ## Installation
 
 Prerequisites
-- Install Homebrew and gum before running the installer.
+- Install Homebrew, gum, and figlet before running the installer.
   - macOS
     - Install Homebrew: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
     - Install gum: `brew install gum`
+    - Install figlet: `brew install figlet`
   - Debian/Ubuntu
     - Install Homebrew (Linuxbrew): `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
     - Ensure brew is in PATH for this shell: `eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"`
     - Install gum: `brew install gum`
+    - Install figlet: `brew install figlet`
 
 ### Option A — Guided installer (recommended)
 
@@ -246,7 +248,7 @@ cd bash-zoo
 - Include experimental tools by adding `--exp` (e.g., `./install.sh --exp`).
 - Skip prompts with `./install.sh --all` (respects `--exp` filtering).
 - Interactive picker also includes an "All" option to select everything.
-- Gum is a required dependency for the interactive selector. The installer does not install prerequisites; ensure `brew` and `gum` are set up first.
+- Gum and figlet are required dependencies for the interactive selector and large-code displays. The installer does not install prerequisites; ensure `brew`, `gum`, and `figlet` are set up first.
 
 ### Option B — Manual pick-and-run
 
