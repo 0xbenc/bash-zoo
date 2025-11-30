@@ -671,9 +671,9 @@ main_loop() {
 
     local header
     if (( MFA_ONLY )); then
-      header="${BOLD}${FG_CYAN}passage${RESET} ${BOLD}/searchTerm${RESET} filter | ${BOLD}#${RESET} select | ${BOLD}b${RESET} back | ${BOLD}q${RESET} quit"
+      header="${BOLD}${FG_CYAN}passage${RESET} ${BOLD}/[search term]${RESET} filter | ${BOLD}#${RESET} select | ${BOLD}b${RESET} back | ${BOLD}q${RESET} quit"
     else
-      header="${BOLD}${FG_CYAN}passage${RESET} ${BOLD}/searchTerm${RESET} filter | ${BOLD}# (number)${RESET} select | ${BOLD}c#/#c${RESET} copy | ${BOLD}r#${RESET} reveal | ${BOLD}t#${RESET} otp | ${BOLD}p#${RESET} pin | ${BOLD}m${RESET} MFA-mode | ${BOLD}x${RESET} clear | ${BOLD}o${RESET} options | ${BOLD}q${RESET} quit"
+      header="${BOLD}${FG_CYAN}passage${RESET} ${BOLD}/[search term]${RESET} filter | ${BOLD}# (number)${RESET} select | ${BOLD}c#/#c${RESET} copy | ${BOLD}r#${RESET} reveal | ${BOLD}t#${RESET} otp | ${BOLD}p#${RESET} pin | ${BOLD}m${RESET} MFA-mode | ${BOLD}x${RESET} clear | ${BOLD}o${RESET} options | ${BOLD}q${RESET} quit"
     fi
 
     gum style \
