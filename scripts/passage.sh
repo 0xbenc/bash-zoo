@@ -154,6 +154,8 @@ state_clear_recents() { local i; for i in "${!state_used[@]}"; do state_used[$i]
 format_label() { local entry="$1"; printf '%s' "${entry//\// | }"; }
 
 CLIPBOARD_TOOL_LAST=""
+ownertrust_cache=""
+
 clipboard_copy() {
   local text="$1"
   CLIPBOARD_TOOL_LAST=""
@@ -182,6 +184,11 @@ clipboard_copy() {
     if printf '%s' "$text" | xsel --clipboard --input >/dev/null 2>&1; then CLIPBOARD_TOOL_LAST="xsel"; return 0; fi
   fi
   return 1
+}
+
+trust_level() {
+  local fp="$1"
+  awk -F: -v F="$fp" '$1==F {print $2; exit}' <<<"$ownertrust_cache"
 }
 
 discover_entries() {
@@ -593,17 +600,343 @@ clear_clipboard() {
   fi
 }
 
+verify_pass_keys_tool() {
+  local root="$PASSWORD_STORE_DIR"
+  if [[ ! -d "$root" ]]; then
+    msg_warn "Password store directory '$root' does not exist; nothing to verify."
+    return 0
+  fi
+  if ! command -v gpg >/dev/null 2>&1; then
+    msg_warn "gpg not found in PATH; cannot verify GNU Pass keys."
+    return 0
+  fi
+
+  ownertrust_cache="$(gpg --export-ownertrust 2>/dev/null || true)"
+
+  local -a stores labels
+  stores=(); labels=()
+
+  # Root store
+  stores+=("$root")
+  labels+=("default")
+
+  # Immediate subfolders
+  local d
+  for d in "$root"/*; do
+    [[ -d "$d" ]] || continue
+    stores+=("$d")
+    labels+=("${d##*/}")
+  done
+
+  if [[ ${#stores[@]} -eq 0 ]]; then
+    msg_warn "No subfolders found under '$root'."
+    return 0
+  fi
+
+  local -a store_total store_missing store_untrusted store_empty store_no_gpgid \
+          store_missing_ids store_untrusted_ids
+  store_total=(); store_missing=(); store_untrusted=(); store_empty=(); store_no_gpgid=()
+  store_missing_ids=(); store_untrusted_ids=()
+
+  local i
+  for i in "${!stores[@]}"; do
+    local dir="${stores[$i]}" lbl="${labels[$i]}" gpg_file
+    local ids=()
+    gpg_file="$dir/.gpg-id"
+    store_total[$i]=0
+    store_missing[$i]=0
+    store_untrusted[$i]=0
+    store_empty[$i]=0
+    store_no_gpgid[$i]=0
+    store_missing_ids[$i]=""
+    store_untrusted_ids[$i]=""
+
+    if [[ ! -f "$gpg_file" ]]; then
+      store_no_gpgid[$i]=1
+      continue
+    fi
+
+    # Read identities from .gpg-id (one per line, trim whitespace, skip empties)
+    local line trimmed
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      trimmed="$line"
+      # trim leading whitespace
+      trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+      # trim trailing whitespace
+      trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+      [[ -z "$trimmed" ]] && continue
+      ids+=("$trimmed")
+    done <"$gpg_file"
+
+    if [[ ${#ids[@]} -eq 0 ]]; then
+      store_empty[$i]=1
+      continue
+    fi
+
+    store_total[$i]=${#ids[@]}
+
+    local id missing_list untrusted_list
+    missing_list=""
+    untrusted_list=""
+
+    for id in "${ids[@]}"; do
+      local category fps_line
+
+      # Secret key present for this identity?
+      if gpg --batch --quiet --list-secret-keys "$id" >/dev/null 2>&1; then
+        category="ok-own"
+      else
+        # List public keys for this identity
+        fps_line="$(gpg --batch --with-colons --list-keys "$id" 2>/dev/null || true)"
+        if [[ -z "$fps_line" ]]; then
+          category="missing"
+        else
+          # Extract primary key fingerprints then check ownertrust cache.
+          local fp
+          local fps=()
+          local pub=0
+          while IFS= read -r line; do
+            case "$line" in
+              pub:*)
+                pub=1
+                ;;
+              fpr:*)
+                if [[ $pub -eq 1 ]]; then
+                  fp=$(printf '%s\n' "$line" | awk -F: '{print $10}')
+                  if [[ -n "$fp" ]]; then
+                    fps+=("$fp")
+                  fi
+                  pub=0
+                fi
+                ;;
+            esac
+          done <<<"$fps_line"
+
+          local has_keys=0 trusted=0
+          for fp in "${fps[@]}"; do
+            has_keys=1
+            local lvl
+            lvl="$(trust_level "$fp")"
+            if [[ "$lvl" == "4" || "$lvl" == "5" ]]; then
+              trusted=1
+              break
+            fi
+          done
+
+          if [[ $trusted -eq 1 ]]; then
+            category="ok-trusted"
+          elif [[ $has_keys -eq 1 ]]; then
+            category="present"
+          else
+            category="missing"
+          fi
+        fi
+      fi
+
+      case "$category" in
+        ok-own|ok-trusted)
+          ;;
+        missing)
+          store_missing[$i]=$((store_missing[$i]+1))
+          if [[ -z "$missing_list" ]]; then
+            missing_list="$id"
+          else
+            missing_list="$missing_list, $id"
+          fi
+          ;;
+        present)
+          store_untrusted[$i]=$((store_untrusted[$i]+1))
+          if [[ -z "$untrusted_list" ]]; then
+            untrusted_list="$id"
+          else
+            untrusted_list="$untrusted_list, $id"
+          fi
+          ;;
+      esac
+    done
+
+    store_missing_ids[$i]="$missing_list"
+    store_untrusted_ids[$i]="$untrusted_list"
+  done
+
+  screen_clear
+  printf '%sTools:%s Verify GNU Pass keys\n\n' "$BOLD$FG_MAGENTA" "$RESET"
+
+  local skip_root=0 has_sub_with_gpgid=0
+  if [[ "${store_no_gpgid[0]:-0}" -eq 1 ]]; then
+    local idx
+    for idx in "${!stores[@]}"; do
+      [[ "$idx" -eq 0 ]] && continue
+      if [[ "${store_no_gpgid[$idx]}" -eq 0 ]]; then
+        has_sub_with_gpgid=1
+        break
+      fi
+    done
+    if [[ $has_sub_with_gpgid -eq 1 ]]; then
+      skip_root=1
+    else
+      msg_warn "No .gpg-id found at '$root' or its immediate subfolders. Did you run 'pass init' here?"
+    fi
+  fi
+
+  local any_store=0 pad=0 name
+  local i2
+  for i2 in "${!stores[@]}"; do
+    if [[ "$i2" -eq 0 && $skip_root -eq 1 ]]; then
+      continue
+    fi
+    name="${labels[$i2]}"
+    local n=${#name}
+    (( n > pad )) && pad=$n
+    any_store=1
+  done
+
+  if [[ $any_store -eq 0 ]]; then
+    msg_warn "No stores found to inspect."
+    return 0
+  fi
+
+  printf '%sChecking stores under:%s %s\n\n' "$DIM" "$RESET" "$root"
+
+  for i2 in "${!stores[@]}"; do
+    if [[ "$i2" -eq 0 && $skip_root -eq 1 ]]; then
+      continue
+    fi
+    local lbl="${labels[$i2]}"
+    local parts=()
+
+    if [[ "${store_no_gpgid[$i2]}" -eq 1 ]]; then
+      parts+=("${FG_BLUE}no .gpg-id${RESET}")
+    elif [[ "${store_empty[$i2]}" -eq 1 ]]; then
+      parts+=("${FG_YELLOW}empty .gpg-id${RESET}")
+    else
+      if [[ "${store_missing[$i2]}" -gt 0 ]]; then
+        parts+=("${FG_RED}missing${RESET} ${DIM}(${store_missing[$i2]}: ${store_missing_ids[$i2]})${RESET}")
+      fi
+      if [[ "${store_untrusted[$i2]}" -gt 0 ]]; then
+        parts+=("${FG_MAGENTA}untrusted${RESET} ${DIM}(${store_untrusted[$i2]}: ${store_untrusted_ids[$i2]})${RESET}")
+      fi
+      if [[ "${store_missing[$i2]}" -eq 0 && "${store_untrusted[$i2]}" -eq 0 ]]; then
+        parts+=("${FG_GREEN}ok${RESET} ${DIM}(${store_total[$i2]} recipient(s))${RESET}")
+      fi
+    fi
+
+    local status=""
+    local j
+    for j in "${!parts[@]}"; do
+      if [[ $j -gt 0 ]]; then status+=", "; fi
+      status+="${parts[$j]}"
+    done
+
+    printf "  • %-${pad}s   %s\n" "$lbl" "$status"
+  done
+
+  local stores_total=0
+  local stores_with_issues=0 stores_ok=0 stores_no_gpgid=0 stores_empty=0
+  for i2 in "${!stores[@]}"; do
+    if [[ "$i2" -eq 0 && $skip_root -eq 1 ]]; then
+      continue
+    fi
+    stores_total=$((stores_total+1))
+    if [[ "${store_no_gpgid[$i2]}" -eq 1 ]]; then
+      stores_no_gpgid=$((stores_no_gpgid+1))
+    elif [[ "${store_empty[$i2]}" -eq 1 ]]; then
+      stores_empty=$((stores_empty+1))
+    elif [[ "${store_missing[$i2]}" -gt 0 || "${store_untrusted[$i2]}" -gt 0 ]]; then
+      stores_with_issues=$((stores_with_issues+1))
+    else
+      stores_ok=$((stores_ok+1))
+    fi
+  done
+
+  local summary_lines=(
+    "stores: $stores_total"
+    "ok: $stores_ok"
+    "with_issues: $stores_with_issues"
+    "no_gpgid: $stores_no_gpgid"
+    "empty_gpgid: $stores_empty"
+  )
+
+  if command -v gum >/dev/null 2>&1 && [[ -t 1 ]]; then
+    local gum_width=50 line len
+    for line in "${summary_lines[@]}"; do
+      len=${#line}
+      if [[ $len -gt $gum_width ]]; then
+        gum_width=$len
+      fi
+    done
+    gum style \
+      --border double \
+      --align center \
+      --width "$gum_width" \
+      --margin "1 2" \
+      --padding "1 4" \
+      "${summary_lines[@]}"
+  else
+    local line2
+    for line2 in "${summary_lines[@]}"; do
+      printf '%s%s%s\n' "$DIM" "$line2" "$RESET"
+    done
+  fi
+
+  printf '\n'
+}
+
+tools_menu() {
+  if ! command -v gum >/dev/null 2>&1; then
+    msg_warn "gum is required for the tools menu."
+    return 0
+  fi
+
+  while true; do
+    screen_clear
+    gum style \
+      --border rounded \
+      --margin "0 1" \
+      --padding "1 2" \
+      --width 60 \
+      "${BOLD}${FG_MAGENTA}Tools${RESET} — passage helpers"
+
+    local choice
+    choice="$(printf 'Back\nVerify GNU Pass keys\n' | gum choose --cursor '➜' --header 'Select a tool')"
+    case "$choice" in
+      Back|'')
+        break
+        ;;
+      "Verify GNU Pass keys")
+        verify_pass_keys_tool
+        printf '%sPress Enter to return to tools...%s\n' "$DIM" "$RESET"
+        read -r _
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+}
+
 options_menu() {
-  printf '%sOptions:%s\n' "$BOLD$FG_MAGENTA" "$RESET"
-  printf '  1) Unpin all\n'
-  printf '  2) Clear recents\n'
-  printf '  b) Back\n'
-  printf 'Select: '
-  local opt; read -r opt || return 0
-  case "$opt" in
-    1) state_unpin_all; state_save; msg_ok "All pins cleared." ;;
-    2) state_clear_recents; state_save; msg_ok "Recents cleared." ;;
-    b|'') : ;;
+  if ! command -v gum >/dev/null 2>&1; then
+    msg_warn "gum is required for the options menu."
+    return 0
+  fi
+
+  local choice
+  choice="$(printf 'Unpin all\nClear recents\nBack\n' | gum choose --cursor '➜' --header 'Options' || true)"
+  case "$choice" in
+    "Unpin all")
+      state_unpin_all
+      state_save
+      msg_ok "All pins cleared."
+      ;;
+    "Clear recents")
+      state_clear_recents
+      state_save
+      msg_ok "Recents cleared."
+      ;;
+    "Back"|'' )
+      :
+      ;;
   esac
 }
 
@@ -671,9 +1004,9 @@ main_loop() {
 
     local header
     if (( MFA_ONLY )); then
-      header="${BOLD}${FG_CYAN}passage${RESET} ${BOLD}/[search term]${RESET} filter | ${BOLD}#${RESET} select | ${BOLD}b${RESET} back | ${BOLD}q${RESET} quit"
+      header="${BOLD}/[search term]${RESET} filter | ${BOLD}#${RESET} select | ${BOLD}b${RESET} back | ${BOLD}z${RESET} tools | ${BOLD}q${RESET} quit"
     else
-      header="${BOLD}${FG_CYAN}passage${RESET} ${BOLD}/[search term]${RESET} filter | ${BOLD}# (number)${RESET} select | ${BOLD}c#/#c${RESET} copy | ${BOLD}r#${RESET} reveal | ${BOLD}t#${RESET} otp | ${BOLD}p#${RESET} pin | ${BOLD}m${RESET} MFA-mode | ${BOLD}x${RESET} clear | ${BOLD}o${RESET} options | ${BOLD}q${RESET} quit"
+      header="${BOLD}/[search term]${RESET} filter | ${BOLD}# (number)${RESET} select | ${BOLD}c#/#c${RESET} copy | ${BOLD}r#${RESET} reveal | ${BOLD}t#${RESET} otp | ${BOLD}p#${RESET} pin | ${BOLD}m${RESET} MFA-mode | ${BOLD}x${RESET} clear | ${BOLD}o${RESET} options | ${BOLD}z${RESET} tools | ${BOLD}q${RESET} quit"
     fi
 
     gum style \
@@ -700,6 +1033,7 @@ main_loop() {
       o) options_menu ;;
       m) if (( MFA_ONLY )); then MFA_ONLY=0; else MFA_ONLY=1; fi ;;
       x) clear_clipboard ;;
+      z) tools_menu ;;
       /*) filter="${cmd#/}" ;;
       r[0-9]*)
         local n="${cmd#r}"
