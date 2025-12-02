@@ -191,6 +191,18 @@ trust_level() {
   awk -F: -v F="$fp" '$1==F {print $2; exit}' <<<"$ownertrust_cache"
 }
 
+ownertrust_label() {
+  local lvl="$1"
+  case "$lvl" in
+    5) printf 'ultimate' ;;
+    4) printf 'full' ;;
+    3) printf 'marginal' ;;
+    2) printf 'never' ;;
+    1) printf 'unknown' ;;
+    *) printf 'unset' ;;
+  esac
+}
+
 discover_entries() {
   [[ -d "$PASSWORD_STORE_DIR" ]] || die "Password store directory '$PASSWORD_STORE_DIR' does not exist."
   # Prefer fd/fdfind for speed; fallback to find
@@ -882,6 +894,369 @@ verify_pass_keys_tool() {
   printf '\n'
 }
 
+list_local_keys_tool() {
+  if ! command -v gpg >/dev/null 2>&1; then
+    msg_warn "gpg not found in PATH; cannot list local keys."
+    return 0
+  fi
+
+  ownertrust_cache="$(gpg --export-ownertrust 2>/dev/null || true)"
+
+  local -a key_fps key_uids
+  key_fps=(); key_uids=()
+
+  while IFS=$'\t' read -r fp uid; do
+    [[ -z "$fp" ]] && continue
+    key_fps+=("$fp")
+    key_uids+=("$uid")
+  done < <(
+    gpg --with-colons --list-keys 2>/dev/null | awk -F: '
+      /^pub:/ {
+        if (fp != "") {
+          print fp "\t" uid
+        }
+        fp=""; uid=""; pub=1; next
+      }
+      /^uid:/ && uid == "" { uid=$10; next }
+      /^fpr:/ && pub { fp=$10; pub=0; next }
+      END {
+        if (fp != "") {
+          print fp "\t" uid
+        }
+      }
+    '
+  )
+
+  if [[ ${#key_fps[@]} -eq 0 ]]; then
+    msg_warn "No local public keys found."
+    return 0
+  fi
+
+  screen_clear
+  gum style \
+    --border rounded \
+    --margin "0 1" \
+    --padding "1 2" \
+    --width 80 \
+    "${BOLD}${FG_MAGENTA}List local GPG keys${RESET}" \
+    "" \
+    "Shows your local public keys, whether you own the" \
+    "secret key, and the ownertrust level (from trustdb)."
+
+  local pad=0 i name
+  for i in "${!key_uids[@]}"; do
+    name="${key_uids[$i]}"
+    [[ -z "$name" ]] && name="<no uid>"
+    local n=${#name}
+    (( n > pad )) && pad=$n
+  done
+
+  local own_count=0 trusted_count=0
+  printf '%sKeys:%s\n\n' "$BOLD$FG_CYAN" "$RESET"
+  for i in "${!key_fps[@]}"; do
+    local fp uid lvl lvl_label has_secret status_parts=()
+    fp="${key_fps[$i]}"
+    uid="${key_uids[$i]}"
+    [[ -z "$uid" ]] && uid="<no uid>"
+
+    if gpg --batch --quiet --list-secret-keys "$fp" >/dev/null 2>&1; then
+      has_secret=1
+      own_count=$((own_count+1))
+      status_parts+=("${FG_GREEN}own-secret${RESET}")
+    else
+      has_secret=0
+      status_parts+=("${FG_YELLOW}public-only${RESET}")
+    fi
+
+    lvl="$(trust_level "$fp")"
+    lvl_label="$(ownertrust_label "${lvl:-}")"
+    if [[ "$lvl" == "4" || "$lvl" == "5" ]]; then
+      trusted_count=$((trusted_count+1))
+      status_parts+=("${FG_CYAN}trusted${RESET} ${DIM}(${lvl_label})${RESET}")
+    else
+      status_parts+=("${DIM}trust:${RESET} ${lvl_label}")
+    fi
+
+    local status="" j
+    for j in "${!status_parts[@]}"; do
+      if [[ $j -gt 0 ]]; then status+=", "; fi
+      status+="${status_parts[$j]}"
+    done
+
+    printf "  • %-${pad}s   %s%s%s\n" "$uid" "${DIM}(${fp})${RESET}  " "$status" ""
+  done
+
+  local total=${#key_fps[@]}
+  local summary_lines=(
+    "keys: $total"
+    "with_secret: $own_count"
+    "trusted_full_or_ultimate: $trusted_count"
+  )
+
+  printf '\n'
+  gum style \
+    --border double \
+    --align center \
+    --width 60 \
+    --margin "1 2" \
+    --padding "1 3" \
+    "${summary_lines[@]}"
+
+  printf '\n'
+}
+
+list_password_keys_tool() {
+  local root="$PASSWORD_STORE_DIR"
+  if [[ ! -d "$root" ]]; then
+    msg_warn "Password store directory '$root' does not exist; nothing to inspect."
+    return 0
+  fi
+  if ! command -v gpg >/dev/null 2>&1; then
+    msg_warn "gpg not found in PATH; cannot inspect password keys."
+    return 0
+  fi
+
+  ownertrust_cache="$(gpg --export-ownertrust 2>/dev/null || true)"
+
+  local -a stores labels
+  stores=(); labels=()
+
+  stores+=("$root")
+  labels+=("default")
+  local root_has_gpgid=0 any_sub_with_gpgid=0
+  [[ -f "$root/.gpg-id" ]] && root_has_gpgid=1
+
+  local d
+  for d in "$root"/*; do
+    [[ -d "$d" ]] || continue
+    stores+=("$d")
+    labels+=("${d##*/}")
+    if [[ -f "$d/.gpg-id" ]]; then
+      any_sub_with_gpgid=1
+    fi
+  done
+
+  if [[ ${#stores[@]} -eq 0 ]]; then
+    msg_warn "No subfolders found under '$root'."
+    return 0
+  fi
+
+  local skip_root=0
+  if [[ $root_has_gpgid -eq 0 && $any_sub_with_gpgid -eq 1 ]]; then
+    skip_root=1
+  fi
+
+  screen_clear
+  gum style \
+    --border rounded \
+    --margin "0 1" \
+    --padding "1 2" \
+    --width 80 \
+    "${BOLD}${FG_MAGENTA}Password store key roll call${RESET}" \
+    "" \
+    "For each store, list the identities from .gpg-id" \
+    "and whether you own their keys and/or trust them."
+
+  local i
+  for i in "${!stores[@]}"; do
+    local dir="${stores[$i]}" lbl="${labels[$i]}"
+    if [[ "$i" -eq 0 && $skip_root -eq 1 ]]; then
+      continue
+    fi
+
+    printf '\n%sStore:%s %s (%s)\n' "$BOLD$FG_CYAN" "$RESET" "$lbl" "$dir"
+    local gpg_file="$dir/.gpg-id"
+    if [[ ! -f "$gpg_file" ]]; then
+      printf '  %s(no .gpg-id)%s\n' "$DIM" "$RESET"
+      continue
+    fi
+
+    local ids=() line trimmed
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      trimmed="$line"
+      trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+      trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+      [[ -z "$trimmed" ]] && continue
+      ids+=("$trimmed")
+    done <"$gpg_file"
+
+    if [[ ${#ids[@]} -eq 0 ]]; then
+      printf '  %s(empty .gpg-id)%s\n' "$DIM" "$RESET"
+      continue
+    fi
+
+    local id
+    for id in "${ids[@]}"; do
+      local category fps_line
+      local uid_disp="" status_parts=()
+
+      if gpg --batch --quiet --list-secret-keys "$id" >/dev/null 2>&1; then
+        category="ok-own"
+      else
+        fps_line="$(gpg --batch --with-colons --list-keys "$id" 2>/dev/null || true)"
+        if [[ -z "$fps_line" ]]; then
+          category="missing"
+        else
+          local fp fps=() pub=0
+          while IFS= read -r line; do
+            case "$line" in
+              pub:*)
+                pub=1
+                ;;
+              fpr:*)
+                if [[ $pub -eq 1 ]]; then
+                  fp=$(printf '%s\n' "$line" | awk -F: '{print $10}')
+                  if [[ -n "$fp" ]]; then
+                    fps+=("$fp")
+                  fi
+                  pub=0
+                fi
+                ;;
+              uid:*)
+                if [[ -z "$uid_disp" ]]; then
+                  uid_disp=$(printf '%s\n' "$line" | awk -F: '{print $10}')
+                fi
+                ;;
+            esac
+          done <<<"$fps_line"
+
+          local has_keys=0 trusted=0
+          for fp in "${fps[@]}"; do
+            has_keys=1
+            local lvl
+            lvl="$(trust_level "$fp")"
+            if [[ "$lvl" == "4" || "$lvl" == "5" ]]; then
+              trusted=1
+              break
+            fi
+          done
+
+          if [[ $trusted -eq 1 ]]; then
+            category="ok-trusted"
+          elif [[ $has_keys -eq 1 ]]; then
+            category="present"
+          else
+            category="missing"
+          fi
+        fi
+      fi
+
+      [[ -z "$uid_disp" ]] && uid_disp="$id"
+
+      case "$category" in
+        ok-own)
+          status_parts+=("${FG_GREEN}own-secret${RESET}")
+          ;;
+        ok-trusted)
+          status_parts+=("${FG_CYAN}trusted${RESET}")
+          ;;
+        present)
+          status_parts+=("${FG_MAGENTA}untrusted${RESET}")
+          ;;
+        missing)
+          status_parts+=("${FG_RED}missing${RESET}")
+          ;;
+      esac
+
+      if [[ "$category" != "missing" && "${#fps[@]}" -gt 0 ]]; then
+        local first_fp lvl lvl_label
+        first_fp="${fps[0]}"
+        lvl="$(trust_level "$first_fp")"
+        lvl_label="$(ownertrust_label "${lvl:-}")"
+        status_parts+=("${DIM}trust:${RESET} ${lvl_label}")
+      fi
+
+      local status="" j
+      for j in "${!status_parts[@]}"; do
+        if [[ $j -gt 0 ]]; then status+=", "; fi
+        status+="${status_parts[$j]}"
+      done
+
+      printf '  • %s%s%s  %s\n' "$FG_WHITE" "$uid_disp" "$RESET" "$status"
+    done
+  done
+
+  printf '\n'
+}
+
+create_gpg_key_tool() {
+  if ! command -v gum >/dev/null 2>&1; then
+    msg_warn "gum is required for the key setup guide."
+    return 0
+  fi
+
+  screen_clear
+  gum style \
+    --border rounded \
+    --margin "0 1" \
+    --padding "1 2" \
+    --width 72 \
+    -- \
+    "${BOLD}${FG_MAGENTA}GPG key setup guide${RESET}" \
+    "" \
+    "Use this guide to create a modern ECC key" \
+    "for GNU pass, then local-sign it and mark" \
+    "it trusted. All commands are run manually."
+
+  printf '\n'
+  gum style \
+    --border rounded \
+    --margin "0 1" \
+    --padding "1 2" \
+    --width 72 \
+    -- \
+    "${BOLD}1) Generate a new key (interactive)${RESET}" \
+    "" \
+    "Run in a regular terminal:" \
+    "" \
+    "  gpg --expert --full-generate-key" \
+    "" \
+    "- Select:  (9) ECC and ECC" \
+    "- Curve:   (1) Curve 25519" \
+    "- Expiry:  0  (does not expire)" \
+    "- Fill in: Real name, Email, Comment" \
+    "- Confirm: O (okay)" \
+    "" \
+    "Wait for GPG to finish generating the" \
+    "primary key and encryption subkey."
+
+  printf '\n'
+  gum style \
+    --border rounded \
+    --margin "0 1" \
+    --padding "1 2" \
+    --width 72 \
+    -- \
+    "${BOLD}2) Find your new key fingerprint${RESET}" \
+    "" \
+    "List your keys and find the new key:" \
+    "" \
+    "  gpg --list-keys" \
+    "" \
+    "Copy the full fingerprint (40 hex characters)" \
+    "for the new key. When the guide says" \
+    "KEY_FPR below, paste that fingerprint there."
+
+  printf '\n'
+  gum style \
+    --border rounded \
+    --margin "0 1" \
+    --padding "1 2" \
+    --width 72 \
+    -- \
+    "${BOLD}3) Locally sign and trust the key${RESET}" \
+    "" \
+    "Use the fingerprint you just copied (KEY_FPR):" \
+    "" \
+    "  gpg --lsign-key KEY_FPR" \
+    "" \
+    "Then mark it ownertrust FULL (4):" \
+    "" \
+    "  echo 'KEY_FPR:4:' | gpg --import-ownertrust"
+
+  printf '\n'
+}
+
 tools_menu() {
   if ! command -v gum >/dev/null 2>&1; then
     msg_warn "gum is required for the tools menu."
@@ -898,13 +1273,36 @@ tools_menu() {
       "${BOLD}${FG_MAGENTA}Tools${RESET} — passage helpers"
 
     local choice
-    choice="$(printf 'Back\nVerify GNU Pass keys\n' | gum choose --cursor '➜' --header 'Select a tool')"
+    choice="$(
+      printf '%s\n' \
+        'Back' \
+        'GPG key setup guide' \
+        'List local keys' \
+        'List password keys' \
+        'Verify GNU Pass keys' | \
+        gum choose --cursor '➜' --header 'Select a tool' || true
+    )"
     case "$choice" in
       Back|'')
         break
         ;;
       "Verify GNU Pass keys")
         verify_pass_keys_tool
+        printf '%sPress Enter to return to tools...%s\n' "$DIM" "$RESET"
+        read -r _
+        ;;
+      "List local keys")
+        list_local_keys_tool
+        printf '%sPress Enter to return to tools...%s\n' "$DIM" "$RESET"
+        read -r _
+        ;;
+      "List password keys")
+        list_password_keys_tool
+        printf '%sPress Enter to return to tools...%s\n' "$DIM" "$RESET"
+        read -r _
+        ;;
+      "GPG key setup guide")
+        create_gpg_key_tool
         printf '%sPress Enter to return to tools...%s\n' "$DIM" "$RESET"
         read -r _
         ;;
@@ -951,7 +1349,9 @@ actions_menu_for() {
   printf '%sPinned:%s %s   %sLast Used:%s %s\n' "$DIM" "$RESET" "$pin" "$DIM" "$RESET" "$used_h"
   printf '\n%sActions:%s [c]opy  [r]eveal  [t]otp  [p]in/unpin  [x] clear-clipboard  [o]ptions  [b]ack  [q]uit\n' "$BOLD" "$RESET"
   printf 'Select: '
-  local act; read -r act || return 0
+  local act
+  read -r act || return 0
+  act="${act//$'\r'/}"
   case "$act" in
     c|'') perform_copy "$path" ;;
     r) perform_reveal "$path" ;;
@@ -1019,7 +1419,11 @@ main_loop() {
     (( MFA_ONLY )) && printf '%sView:%s MFA-only\n' "$DIM" "$RESET"
     print_listing
     printf '\nCommand: '
-    local cmd; read -r cmd || { printf '\n'; break; }
+    local cmd
+    read -r cmd || { printf '\n'; break; }
+
+    # Normalize Mac-style CR line endings to LF
+    cmd="${cmd//$'\r'/}"
 
     # Trim spaces
     cmd="${cmd## }"; cmd="${cmd%% }"
