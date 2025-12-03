@@ -36,6 +36,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
   - [forgit](#forgit)
   - [gpgobble](#gpgobble)
   - [killport](#killport)
+  - [hostshelper](#hostshelper)
   - [ssherpa](#ssherpa)
   - [passage](#passage)
   - [uuid](#uuid)
@@ -64,6 +65,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 | `forgit` | ✅ stable | Scan directories for Git repos needing commits or pushes | macOS, Debian/Ubuntu | `git` |
 | `gpgobble` | ✅ stable | Bulk‑import public keys and set ownertrust to FULL (4) for non‑local keys | macOS, Debian/Ubuntu | `gnupg` |
 | `killport` | ✅ stable | Free a TCP/UDP port with gum selection, TERM→KILL, and wait | macOS, Debian/Ubuntu | `lsof` (Linux optionally `iproute2` for `ss`) |
+| `hostshelper` | ✅ stable | Save host/IP pairs + presets and write them into `/etc/hosts` | macOS, Debian/Ubuntu | none (gum UI; sudo to write `/etc/hosts`) |
 | `ssherpa` | ✅ stable | Alias-first SSH host picker + interactive config writer | macOS, Debian/Ubuntu | none (gum UI only) |
 | `passage` | ✅ stable | Interactive GNU Pass browser with pins and MRU; copy or reveal password; built‑in TOTP (MFA) helpers | macOS, Debian/Ubuntu | `pass`, `oathtool`, platform clipboard utility |
 | `uuid` | ✅ stable | Create and copy a fresh UUID without leaving the terminal | macOS, Debian/Ubuntu | `uuidgen` (or Python 3), clipboard tool (`pbcopy`/`xclip`/`xsel`) |
@@ -109,6 +111,21 @@ killport 8080 --list               # list found processes without acting
 Notes
 - gum-only UI. On Linux, prefers `ss` if available; otherwise uses `lsof`.
 - Safe defaults: TERM → optional KILL after 3s; wait up to 5s for the port to free; never sudo.
+
+### hostshelper
+
+`hostshelper` keeps host/IP pairs and named presets in `~/.bash-zoo/hosthelper.toml`, then writes them into a managed block inside `/etc/hosts` with a gum UI. Add entries one field at a time, merge a single host into the block, or swap the block to a preset like `at-home`.
+
+Usage
+
+```bash
+hostshelper   # gum TUI for adding hosts, building presets, and applying to /etc/hosts
+```
+
+Notes
+- Gum-only UI; writing to `/etc/hosts` prompts for sudo.
+- Managed block is wrapped with `# hostshelper start/end` and de-duplicates hostnames.
+- Applying a preset replaces the managed block; applying a single host merges with the current block.
 
 ### ssherpa
 

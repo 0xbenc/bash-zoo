@@ -573,6 +573,7 @@ known_tools() {
   printf '%s\n' \
     forgit \
     gpgobble \
+    hostshelper \
     killport \
     mfa \
     passage \

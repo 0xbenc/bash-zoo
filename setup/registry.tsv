@@ -9,3 +9,4 @@ passage	debian,macos	yes	Interactive pass browser with pins + MRU and clipboard 
 gpgobble	debian,macos	yes	Bulk import public keys and set ownertrust FULL (4) for non-local keys
 killport	debian,macos	yes	Free a port by killing listeners
 ssherpa	debian,macos	no	Alias-first SSH picker + interactive config writer
+hostshelper	debian,macos	no	Manage /etc/hosts entries with gum presets
