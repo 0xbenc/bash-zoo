@@ -121,6 +121,7 @@ PATTERNS=()  # 0/1
 # UI labels and helpers
 ADD_ROW_LABEL="➕ Add new alias…"
 JUMP_ROW_LABEL="🧭 Jump via intermediate hops…"
+PROXY_ROW_LABEL="🧦 Start SOCKS proxy (preset)…"
 style_step() { gum style --bold --foreground 212 "$1" 2>/dev/null || printf '%s\n' "$1"; }
 style_hint() { gum style --faint "$1" 2>/dev/null || printf '%s\n' "$1"; }
 clear_screen() {
@@ -235,7 +236,9 @@ build_alias_lines() {
   LINES=()
   # Synthetic Add row first so it appears before other options
   LINES+=("ADD"$'\t'"$ADD_ROW_LABEL")
-   # Jump mode row, placed after ADD and before aliases
+  # Proxy row, placed after ADD and before jump/aliases
+  LINES+=("PROXY"$'\t'"$PROXY_ROW_LABEL")
+  # Jump mode row, placed after ADD/PROXY and before aliases
   LINES+=("JUMP"$'\t'"$JUMP_ROW_LABEL")
   local i name host user port key ispat info
   for i in "${!NAMES[@]}"; do
@@ -456,7 +459,7 @@ ssherpa_jump_flow() {
   for l in "${LINES[@]:-}"; do
     token=$(printf '%s' "$l" | awk -F '\t' '{print $1}')
     case "$token" in
-      ADD|JUMP) continue ;;
+      ADD|PROXY|JUMP) continue ;;
     esac
     alias_lines+=("$l")
   done
@@ -626,6 +629,65 @@ ssherpa_jump_flow() {
   alt_screen_off
 }
 
+ssherpa_proxy_flow() {
+  # SOCKS proxy helper that reuses the regular alias list.
+  # Args: include_patterns filter_user prefilter no_color ssh_args...
+  local include_patterns="$1" filter_user="$2" prefilter="$3" no_color="$4"
+  shift 4
+  local ssh_args=("$@")
+  local default_port="1080"
+  local port
+  while :; do
+    port=$(gum input --placeholder "SOCKS port (default 1080)" --value "$default_port")
+    [[ -z "${port:-}" ]] && port="$default_port"
+    if [[ "$port" =~ ^[0-9]+$ ]]; then
+      break
+    fi
+    gum style --foreground 196 "Port must be digits only."
+  done
+
+  # Build alias list (same presets as main view), then drop synthetic rows.
+  build_alias_lines "$include_patterns" "$filter_user" "$prefilter" "$no_color"
+  local alias_lines=() l token
+  for l in "${LINES[@]:-}"; do
+    token=$(printf '%s' "$l" | awk -F '\t' '{print $1}')
+    case "$token" in
+      ADD|PROXY|JUMP) continue ;;
+    esac
+    alias_lines+=("$l")
+  done
+
+  if [[ ${#alias_lines[@]} -eq 0 ]]; then
+    gum style --foreground 196 "No aliases available for proxy."
+    return 0
+  fi
+
+  # Let the user pick which alias will run the SOCKS proxy.
+  local chosen alias display
+  while :; do
+    chosen=$(printf '%s\n' "${alias_lines[@]}" | gum filter --placeholder "Filter SSH aliases…" --header "Pick host for SOCKS proxy" --limit 1) || {
+      printf '%s\n' "[skipped] proxy cancelled"
+      return 0
+    }
+    [[ -n "$chosen" ]] || continue
+    alias=$(printf '%s' "$chosen" | awk -F '\t' '{print $1}')
+    display=$(printf '%s' "$chosen" | awk -F '\t' '{print $2}')
+    break
+  done
+
+  local remote="$alias"
+
+  gum style --bold --foreground 212 "Starting SSH SOCKS proxy"
+  gum style --faint "Command: ssh -D $port -C -N $remote${ssh_args:+ }${ssh_args[*]:-}"
+  gum style --faint "Press Ctrl-C to stop the proxy."
+
+  # After SSH successfully connects, run a local gum command to announce it.
+  local local_cmd
+  local_cmd="gum style --foreground 46 'Proxy connected on port $port.'"
+
+  exec ssh -oPermitLocalCommand=yes -oLocalCommand="$local_cmd" -D "$port" -C -N "$remote" "${ssh_args[@]:-}"
+}
+
 main() {
   local sub=""; [[ $# -gt 0 ]] && case "$1" in add) sub="$1"; shift ;; esac
   local include_patterns=0 do_print=0 do_exec=1 filter_user="" no_color=0 prefilter="" cfg_path="" ssh_args=()
@@ -755,7 +817,7 @@ EOF
 
   # Show via gum filter
   local chosen
-  chosen=$(printf '%s\n' "${LINES[@]}" | gum filter --placeholder "Filter SSH aliases…" --header "Pick an SSH alias, choose JUMP or ADD" --limit 1)
+  chosen=$(printf '%s\n' "${LINES[@]}" | gum filter --placeholder "Filter SSH aliases…" --header "Pick an SSH alias, or PROXY/JUMP/ADD" --limit 1)
   if [[ -z "$chosen" ]]; then
     echo "[skipped] no selection made"
     exit 0
@@ -769,6 +831,9 @@ EOF
   case "$token" in
     ADD)
       ssherpa_add_flow "" "" "" "" "" "${cfg_path:-}" 0 0
+      ;;
+    PROXY)
+      ssherpa_proxy_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${ssh_args[@]:-}"
       ;;
     JUMP)
       ssherpa_jump_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "$do_print" "$do_exec" "${ssh_args[@]:-}"
