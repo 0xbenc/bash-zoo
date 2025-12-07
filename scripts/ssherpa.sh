@@ -638,7 +638,7 @@ ssherpa_proxy_flow() {
   local default_port="1080"
   local port
   while :; do
-    port=$(gum input --placeholder "SOCKS port (default 1080)" --value "$default_port")
+    port=$(gum input --placeholder "Local SOCKS proxy port (default 1080)")
     [[ -z "${port:-}" ]] && port="$default_port"
     if [[ "$port" =~ ^[0-9]+$ ]]; then
       break
