@@ -16,6 +16,7 @@ Usage:
 Subcommands:
   ssherpa add [--alias NAME] [--host HOST] [--user USER] [--port 22]
               [--identity PATH] [--config PATH] [--dry-run] [--yes]
+  ssherpa edit [--config PATH] [--all] [--filter SUBSTR] [--user USER]
 
 Defaults:
   Interactive gum filter, executes ssh after selection.
@@ -24,7 +25,7 @@ Defaults:
 Examples:
   ssherpa
   ssherpa --print -- -L 8080:localhost:8080
-  ssherpa --filter prod --user alice
+  ssherpa --filter prod --user farmer
   ssherpa --all
 EOF
 }
@@ -122,6 +123,7 @@ PATTERNS=()  # 0/1
 ADD_ROW_LABEL="➕ Add new alias…"
 JUMP_ROW_LABEL="🧭 Jump via intermediate hops…"
 PROXY_ROW_LABEL="🧦 Start SOCKS proxy (preset)…"
+EDIT_ROW_LABEL="✏️ Edit aliases or delete…"
 style_step() { gum style --bold --foreground 212 "$1" 2>/dev/null || printf '%s\n' "$1"; }
 style_hint() { gum style --faint "$1" 2>/dev/null || printf '%s\n' "$1"; }
 clear_screen() {
@@ -236,9 +238,11 @@ build_alias_lines() {
   LINES=()
   # Synthetic Add row first so it appears before other options
   LINES+=("ADD"$'\t'"$ADD_ROW_LABEL")
-  # Proxy row, placed after ADD and before jump/aliases
+  # Edit row, placed after ADD and before proxy/jump/aliases
+  LINES+=("EDIT"$'\t'"$EDIT_ROW_LABEL")
+  # Proxy row, placed after ADD/EDIT and before jump/aliases
   LINES+=("PROXY"$'\t'"$PROXY_ROW_LABEL")
-  # Jump mode row, placed after ADD/PROXY and before aliases
+  # Jump mode row, placed after ADD/EDIT/PROXY and before aliases
   LINES+=("JUMP"$'\t'"$JUMP_ROW_LABEL")
   local i name host user port key ispat info
   for i in "${!NAMES[@]}"; do
@@ -280,8 +284,6 @@ atomic_write_file() {
   mv -f "$tmp" "$dst"
 }
 
-:
-
 remove_alias_from_config_stream() {
   # stdin: original config; stdout: config without the alias stanza(s)
   # args: alias
@@ -298,6 +300,34 @@ remove_alias_from_config_stream() {
     }
     { if (copy) print }
   '
+}
+
+delete_alias_everywhere() {
+  # args: alias dry_run
+  local alias="$1" dry_run="${2:-0}"
+  local cfg tmp changed any=0
+  for cfg in "${CONFIG_FILES[@]:-}"; do
+    [[ -f "$cfg" ]] || continue
+    tmp=$(mktemp)
+    remove_alias_from_config_stream "$alias" < "$cfg" > "$tmp"
+    if cmp -s "$cfg" "$tmp" 2>/dev/null; then
+      rm -f "$tmp" 2>/dev/null || true
+      continue
+    fi
+    changed=1
+    any=1
+    if [[ "$dry_run" -eq 1 ]]; then
+      echo "[would-removed] $alias from $cfg"
+      rm -f "$tmp" 2>/dev/null || true
+      continue
+    fi
+    atomic_write_file "$tmp" "$cfg"
+    rm -f "$tmp" 2>/dev/null || true
+    echo "[removed] $alias from $cfg"
+  done
+  if [[ "${changed:-0}" -ne 1 && "$any" -eq 0 ]]; then
+    echo "[skipped] alias '$alias' not found"
+  fi
 }
 
 write_alias_stanza() {
@@ -391,7 +421,7 @@ ssherpa_add_flow() {
     style_step "Step 3/5 — User (optional)"
     draw_rule
     style_hint "Leave blank to use your SSH config default or remote default user."
-    user=$(gum input --placeholder "e.g., alice (blank = default)")
+    user=$(gum input --placeholder "e.g., farmer (blank = default)")
   fi
 
   # Step 4: Port (optional)
@@ -417,7 +447,7 @@ ssherpa_add_flow() {
     style_hint "Choose a key, type a path, or select None to skip."
     local sel
     if list_private_keys >/dev/null 2>&1 && [[ -n "$(list_private_keys)" ]]; then
-      sel=$( { list_private_keys; printf '%s\n' "Other…" "None"; } | gum choose --header "IdentityFile (optional)") || sel="None"
+      sel=$( { printf '%s\n' "None" "Other…"; list_private_keys; } | gum choose --header "IdentityFile (optional)") || sel="None"
       case "$sel" in
         "Other…") ident=$(gum input --placeholder "Path to private key (e.g., ~/.ssh/id_ed25519)") ;;
         "None") ident="" ;;
@@ -444,6 +474,231 @@ ssherpa_add_flow() {
   alt_screen_off
 }
 
+ssherpa_edit_alias_fields() {
+  # args: alias host user port identity cfg_path
+  local alias="$1" host="$2" user="$3" port="$4" ident="$5" cfg="$6"
+
+  # Step 1: HostName (required)
+  while true; do
+    clear_screen
+    style_step "Edit '$alias' — HostName"
+    draw_rule
+    style_hint "Update the server hostname or IP (required)."
+    [[ -n "$host" ]] && style_hint "Current: $host"
+    local new_host
+    new_host=$(gum input --placeholder "e.g., 10.0.0.5 or foo.example.com" --value "$host")
+    new_host=$(trim "${new_host:-}")
+    if [[ -n "$new_host" ]]; then
+      host="$new_host"
+      break
+    fi
+    echo "HostName cannot be empty." >&2
+  done
+
+  # Step 2: User (optional)
+  clear_screen
+  style_step "Edit '$alias' — User (optional)"
+  draw_rule
+  if [[ -n "$user" ]]; then
+    style_hint "Current user: $user (blank = default)."
+  else
+    style_hint "Leave blank to use your SSH default user."
+  fi
+  local new_user
+  new_user=$(gum input --placeholder "e.g., farmer (blank = default)" --value "$user")
+  user="${new_user:-}"
+
+  # Step 3: Port (optional)
+  while true; do
+    clear_screen
+    style_step "Edit '$alias' — Port (optional)"
+    draw_rule
+    if [[ -n "$port" ]]; then
+      style_hint "Current port: $port (blank = default 22)."
+    else
+      style_hint "Default SSH port is 22. Press Enter to accept."
+    fi
+    local p
+    p=$(gum input --placeholder "Default: 22 (press Enter)" --value "${port:-22}")
+    if [[ -z "$p" ]]; then
+      port=""
+      break
+    elif [[ "$p" =~ ^[0-9]+$ ]]; then
+      port="$p"
+      break
+    else
+      echo "Port must be digits only." >&2
+    fi
+  done
+
+  # Step 4: IdentityFile (optional)
+  clear_screen
+  style_step "Edit '$alias' — IdentityFile (optional)"
+  draw_rule
+  if [[ -n "$ident" ]]; then
+    style_hint "Current IdentityFile: $ident (blank = none)."
+  else
+    style_hint "Leave blank to keep using your default SSH key settings."
+  fi
+  local new_ident
+  new_ident=$(gum input --placeholder "Path to private key (optional)" --value "$ident")
+  ident="${new_ident:-}"
+
+  # Review and confirm
+  clear_screen
+  style_step "Review changes for '$alias'"
+  draw_rule
+  echo "HostName: $host"
+  [[ -n "$user" ]] && echo "User: $user" || echo "User: (default)"
+  [[ -n "$port" ]] && echo "Port: $port" || echo "Port: (22 by default)"
+  [[ -n "$ident" ]] && echo "IdentityFile: $ident" || echo "IdentityFile: (none)"
+  local dest_cfg
+  dest_cfg="${cfg:-$(config_path_default)}"
+  style_hint "Target config: $dest_cfg"
+  if ! gum confirm "Save changes to '$alias' in $dest_cfg?"; then
+    echo "[skipped] edit cancelled"
+    return 0
+  fi
+
+  # Remove any existing definitions, then write the updated stanza.
+  delete_alias_everywhere "$alias" 0
+  write_alias_stanza "$dest_cfg" "$alias" "$host" "$user" "$port" "$ident" 0 1
+}
+
+ssherpa_edit_single_alias() {
+  # args: include_patterns filter_user prefilter no_color cfg_path alias
+  local include_patterns="$1" filter_user="$2" prefilter="$3" no_color="$4" cfg_path="$5" alias="$6"
+  local idx=-1 i
+  for i in "${!NAMES[@]}"; do
+    if [[ "${NAMES[$i]}" == "$alias" ]]; then
+      idx="$i"
+      break
+    fi
+  done
+  if [[ "$idx" -lt 0 ]]; then
+    clear_screen
+    style_step "Edit mode"
+    draw_rule
+    echo_err "Alias '$alias' not found."
+    return 0
+  fi
+
+  local host="${HOSTS[$idx]}" user="${USERS[$idx]}" port="${PORTS[$idx]}" ident="${KEYS[$idx]}"
+
+  while true; do
+    clear_screen
+    style_step "Edit alias '$alias'"
+    draw_rule
+    echo "HostName: ${host:-"(none)"}"
+    [[ -n "$user" ]] && echo "User: $user" || echo "User: (default)"
+    [[ -n "$port" ]] && echo "Port: $port" || echo "Port: (22 by default)"
+    [[ -n "$ident" ]] && echo "IdentityFile: $ident" || echo "IdentityFile: (none)"
+    draw_rule
+    local action
+    action=$(printf '%s\n' \
+      "Change host/user/port/identity" \
+      "Delete this alias" \
+      "Back" | gum choose --header "Choose action for '$alias'") || return 0
+    case "$action" in
+      "Change host/user/port/identity")
+        ssherpa_edit_alias_fields "$alias" "$host" "$user" "$port" "$ident" "$cfg_path"
+        return 0
+        ;;
+      "Delete this alias")
+        if gum confirm "Delete alias '$alias' from all loaded SSH configs?"; then
+          delete_alias_everywhere "$alias" 0
+        else
+          echo "[skipped] delete cancelled"
+        fi
+        return 0
+        ;;
+      "Back")
+        return 0
+        ;;
+    esac
+  done
+}
+
+ssherpa_edit_mode() {
+  # args: include_patterns filter_user prefilter no_color cfg_path
+  local include_patterns="$1" filter_user="$2" prefilter="$3" no_color="$4" cfg_path="$5"
+
+  alt_screen_on
+  clear_screen
+
+  # Build alias list (same presets as main view), then drop synthetic rows.
+  build_alias_lines "$include_patterns" "$filter_user" "$prefilter" "$no_color"
+  local alias_lines=() l token
+  for l in "${LINES[@]:-}"; do
+    token=$(printf '%s' "$l" | awk -F '\t' '{print $1}')
+    case "$token" in
+      ADD|EDIT|PROXY|JUMP) continue ;;
+    esac
+    alias_lines+=("$l")
+  done
+
+  if [[ ${#alias_lines[@]} -eq 0 ]]; then
+    alt_screen_off
+    echo "[skipped] no aliases available to edit"
+    return 0
+  fi
+
+  # Create an edit list with a quick "delete all" row.
+  local edit_lines=()
+  edit_lines+=("DELETE_ALL"$'\t'"🗑 Delete ALL listed aliases…")
+  for l in "${alias_lines[@]}"; do
+    edit_lines+=("$l")
+  done
+
+  clear_screen
+  style_step "Edit mode — pick alias or Delete ALL"
+  draw_rule
+  style_hint "Select an alias to edit/delete, or Delete ALL presets."
+  local chosen
+  chosen=$(printf '%s\n' "${edit_lines[@]}" | gum filter --placeholder "Filter SSH aliases…" --header "Edit mode — pick alias or Delete ALL" --limit 1)
+  if [[ -z "$chosen" ]]; then
+    alt_screen_off
+    echo "[skipped] edit cancelled"
+    return 0
+  fi
+
+  token=$(printf '%s' "$chosen" | awk -F '\t' '{print $1}')
+  case "$token" in
+    DELETE_ALL)
+      # Collect all aliases currently listed (respecting filters).
+      local to_delete=() line alias
+      for line in "${alias_lines[@]}"; do
+        alias=$(printf '%s' "$line" | awk -F '\t' '{print $1}')
+        to_delete+=("$alias")
+      done
+      clear_screen
+      style_step "Delete ALL presets"
+      draw_rule
+      style_hint "This will delete ${#to_delete[@]} aliases from your SSH config(s)."
+      if gum confirm "Really delete ALL listed aliases?"; then
+        local a
+        for a in "${to_delete[@]}"; do
+          delete_alias_everywhere "$a" 0
+        done
+        alt_screen_off
+        echo "[removed] ${#to_delete[@]} aliases"
+        return 0
+      else
+        alt_screen_off
+        echo "[skipped] delete-all cancelled"
+        return 0
+      fi
+      ;;
+    *)
+      local alias
+      alias="$token"
+      ssherpa_edit_single_alias "$include_patterns" "$filter_user" "$prefilter" "$no_color" "$cfg_path" "$alias"
+      alt_screen_off
+      return 0
+      ;;
+  esac
+}
+
 ssherpa_jump_flow() {
   # args: include_patterns filter_user prefilter no_color do_print do_exec ssh_args...
   local include_patterns="$1" filter_user="$2" prefilter="$3" no_color="$4" do_print="$5" do_exec="$6"
@@ -459,7 +714,7 @@ ssherpa_jump_flow() {
   for l in "${LINES[@]:-}"; do
     token=$(printf '%s' "$l" | awk -F '\t' '{print $1}')
     case "$token" in
-      ADD|PROXY|JUMP) continue ;;
+      ADD|EDIT|PROXY|JUMP) continue ;;
     esac
     alias_lines+=("$l")
   done
@@ -652,7 +907,7 @@ ssherpa_proxy_flow() {
   for l in "${LINES[@]:-}"; do
     token=$(printf '%s' "$l" | awk -F '\t' '{print $1}')
     case "$token" in
-      ADD|PROXY|JUMP) continue ;;
+      ADD|EDIT|PROXY|JUMP) continue ;;
     esac
     alias_lines+=("$l")
   done
@@ -689,7 +944,7 @@ ssherpa_proxy_flow() {
 }
 
 main() {
-  local sub=""; [[ $# -gt 0 ]] && case "$1" in add) sub="$1"; shift ;; esac
+  local sub=""; [[ $# -gt 0 ]] && case "$1" in add|edit) sub="$1"; shift ;; esac
   local include_patterns=0 do_print=0 do_exec=1 filter_user="" no_color=0 prefilter="" cfg_path="" ssh_args=()
   local alias="" host="" user="" port="" ident="" dry_run=0 yes=0
   while [[ $# -gt 0 ]]; do
@@ -724,15 +979,20 @@ main() {
 
   ensure_gum || exit 1
 
+  # Load config (used by both main and edit flows)
+  load_config_files
+  [[ -n "${cfg_path:-}" ]] && CONFIG_FILES=("$cfg_path")
+  parse_configs
+
   if [[ "$sub" == "add" ]]; then
     ssherpa_add_flow "$alias" "$host" "$user" "$port" "$ident" "${cfg_path:-}" "$dry_run" "$yes"
     exit 0
   fi
 
-  # Load config
-  load_config_files
-  [[ -n "${cfg_path:-}" ]] && CONFIG_FILES=("$cfg_path")
-  parse_configs
+  if [[ "$sub" == "edit" ]]; then
+    ssherpa_edit_mode "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${cfg_path:-}"
+    exit 0
+  fi
 
   # Build selection list (aliases only + synthetic add row)
   build_alias_lines "$include_patterns" "$filter_user" "$prefilter" "$no_color"
@@ -776,7 +1036,7 @@ Example entry that ssherpa can write:
 
   Host work-prod
     HostName 203.0.113.42
-    User alice
+    User farmer
     Port 22
     IdentityFile ~/.ssh/id_ed25519
 
@@ -797,7 +1057,7 @@ EOF
 "Example:" \
 "Host my-server" \
 "  HostName 203.0.113.42" \
-"  User alice" \
+"  User farmer" \
 "  Port 22" \
 "  IdentityFile ~/.ssh/id_ed25519"
           fi
@@ -817,7 +1077,7 @@ EOF
 
   # Show via gum filter
   local chosen
-  chosen=$(printf '%s\n' "${LINES[@]}" | gum filter --placeholder "Filter SSH aliases…" --header "Pick an SSH alias, or PROXY/JUMP/ADD" --limit 1)
+  chosen=$(printf '%s\n' "${LINES[@]}" | gum filter --placeholder "Filter SSH aliases…" --header "Pick an SSH alias, or ADD/EDIT/PROXY/JUMP" --limit 1)
   if [[ -z "$chosen" ]]; then
     echo "[skipped] no selection made"
     exit 0
@@ -831,6 +1091,9 @@ EOF
   case "$token" in
     ADD)
       ssherpa_add_flow "" "" "" "" "" "${cfg_path:-}" 0 0
+      ;;
+    EDIT)
+      ssherpa_edit_mode "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${cfg_path:-}"
       ;;
     PROXY)
       ssherpa_proxy_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${ssh_args[@]:-}"
