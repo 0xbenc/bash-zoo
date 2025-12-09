@@ -143,6 +143,7 @@ ssherpa --all                                 # include wildcard patterns too
 Notes
 - Gum-only UI; no fzf. It parses `Host`, `HostName`, `User`, `Port`, and first `IdentityFile`. `Match` blocks are ignored.
 - Labels show `user@host:port [key]` when present; connection is always `ssh <alias>` so your config fully applies.
+- Entries with `User git` are hidden by default; set `SSHERPA_IGNORE_USER_GIT=0` in your shell config to include them.
 
 Passage’s built‑in TOTP support uses the same `/mfa` convention as the former `mfa` helper. To make MFA work smoothly you need:
 

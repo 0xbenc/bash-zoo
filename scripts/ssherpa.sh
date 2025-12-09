@@ -44,6 +44,13 @@ trim() {
   printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
 
+is_git_user() {
+  case "$1" in
+    git|Git|GIT) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 is_pattern_name() {
   case "$1" in *'*'*|*'?'*) return 0 ;; *) return 1 ;; esac
 }
@@ -235,6 +242,11 @@ parse_configs() {
 build_alias_lines() {
   # Build lines with a real tab between alias token and display.
   local include_patterns="$1" filter_user="$2" prefilter="$3" no_color="$4"
+  local ignore_git_user
+  case "${SSHERPA_IGNORE_USER_GIT:-1}" in
+    0|false|no|off) ignore_git_user=0 ;;
+    *) ignore_git_user=1 ;;
+  esac
   LINES=()
   # Synthetic Add row first so it appears before other options
   LINES+=("ADD"$'\t'"$ADD_ROW_LABEL")
@@ -248,6 +260,9 @@ build_alias_lines() {
   for i in "${!NAMES[@]}"; do
     name="${NAMES[$i]}"; host="${HOSTS[$i]}"; user="${USERS[$i]}"; port="${PORTS[$i]}"; key="${KEYS[$i]}"; ispat="${PATTERNS[$i]}"
     if [[ "$include_patterns" != "1" && "$ispat" == "1" ]]; then continue; fi
+    if [[ "$ignore_git_user" -eq 1 && -z "$filter_user" ]] && is_git_user "${user:-}"; then
+      continue
+    fi
     if [[ -n "$filter_user" && -n "$user" && "$user" != "$filter_user" ]]; then continue; fi
     info=""
     if [[ -n "$user" || -n "$host" || -n "$port" ]]; then
