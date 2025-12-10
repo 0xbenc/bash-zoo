@@ -346,8 +346,8 @@ delete_alias_everywhere() {
 }
 
 write_alias_stanza() {
-  # args: config_path alias host user port identity dry_run yes
-  local cfg="$1" alias="$2" host="$3" user="$4" port="$5" ident="$6" dry_run="$7" yes="$8"
+  # args: config_path alias host user port identity identities_only dry_run yes
+  local cfg="$1" alias="$2" host="$3" user="$4" port="$5" ident="$6" identities_only="$7" dry_run="$8" yes="$9"
   local have=0 existed=0
   if [[ -f "$cfg" ]]; then have=1; fi
   local tmp
@@ -369,6 +369,7 @@ write_alias_stanza() {
     if [[ -n "$user" ]]; then printf '  User %s\n' "$user"; fi
     if [[ -n "$port" ]]; then printf '  Port %s\n' "$port"; fi
     if [[ -n "$ident" ]]; then printf '  IdentityFile %s\n' "$ident"; fi
+    if [[ "${identities_only:-0}" -eq 1 ]]; then printf '  IdentitiesOnly yes\n'; fi
   } >> "$tmp"
 
   if [[ $dry_run -eq 1 ]]; then
@@ -404,6 +405,7 @@ list_private_keys() {
 ssherpa_add_flow() {
   # args: alias host user port identity config dry_run yes
   local alias="$1" host="$2" user="$3" port="$4" ident="$5" cfg="$6" dry_run="$7" yes="$8"
+  local identities_only=0
   alt_screen_on
   clear_screen
 
@@ -473,6 +475,18 @@ ssherpa_add_flow() {
     fi
   fi
 
+  # Optional: IdentitiesOnly when a key is set
+  if [[ -n "$ident" ]]; then
+    clear_screen
+    style_step "IdentitiesOnly for this key?"
+    draw_rule
+    style_hint "IdentitiesOnly tells ssh to use only this key for this host,"
+    style_hint "instead of trying every key in your agent (avoids 'too many auth failures')."
+    if gum confirm "Add 'IdentitiesOnly yes' for '$alias'?"; then
+      identities_only=1
+    fi
+  fi
+
   # Clear and show concise review + confirmation
   clear_screen
   style_step "Review"
@@ -480,12 +494,21 @@ ssherpa_add_flow() {
   echo "HostName: $host"
   [[ -n "$user" ]] && echo "User: $user" || echo "User: (default)"
   [[ -n "$port" ]] && echo "Port: $port" || echo "Port: (22 by default)"
-  [[ -n "$ident" ]] && echo "IdentityFile: $ident" || echo "IdentityFile: (none)"
+  if [[ -n "$ident" ]]; then
+    echo "IdentityFile: $ident"
+    if [[ "$identities_only" -eq 1 ]]; then
+      echo "IdentitiesOnly: yes"
+    else
+      echo "IdentitiesOnly: (no — other keys may still be tried)"
+    fi
+  else
+    echo "IdentityFile: (none)"
+  fi
   # Confirm path unless --yes
   if [[ "$yes" -ne 1 ]]; then
     gum confirm "Write to $(printf '%s' "${cfg:-$(config_path_default)}")?" || { echo "[skipped] cancelled"; alt_screen_off; return 0; }
   fi
-  write_alias_stanza "${cfg:-$(config_path_default)}" "$alias" "$host" "$user" "$port" "$ident" "$dry_run" "$yes"
+  write_alias_stanza "${cfg:-$(config_path_default)}" "$alias" "$host" "$user" "$port" "$ident" "$identities_only" "$dry_run" "$yes"
   alt_screen_off
 }
 
@@ -577,7 +600,7 @@ ssherpa_edit_alias_fields() {
 
   # Remove any existing definitions, then write the updated stanza.
   delete_alias_everywhere "$alias" 0
-  write_alias_stanza "$dest_cfg" "$alias" "$host" "$user" "$port" "$ident" 0 1
+  write_alias_stanza "$dest_cfg" "$alias" "$host" "$user" "$port" "$ident" 0 0 1
 }
 
 ssherpa_edit_single_alias() {
