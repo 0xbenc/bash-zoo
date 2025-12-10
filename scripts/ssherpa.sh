@@ -17,6 +17,7 @@ Subcommands:
   ssherpa add [--alias NAME] [--host HOST] [--user USER] [--port 22]
               [--identity PATH] [--config PATH] [--dry-run] [--yes]
   ssherpa edit [--config PATH] [--all] [--filter SUBSTR] [--user USER]
+  ssherpa authkeys                     # manage authorized_keys on this device
 
 Defaults:
   Interactive gum filter, executes ssh after selection.
@@ -131,6 +132,7 @@ ADD_ROW_LABEL="➕ Add new alias…"
 JUMP_ROW_LABEL="🧭 Jump via intermediate hops…"
 PROXY_ROW_LABEL="🧦 Start SOCKS proxy (preset)…"
 EDIT_ROW_LABEL="✏️ Edit aliases or delete…"
+AUTHKEYS_ROW_LABEL="🔑 Manage authorized_keys on this device…"
 style_step() { gum style --bold --foreground 212 "$1" 2>/dev/null || printf '%s\n' "$1"; }
 style_hint() { gum style --faint "$1" 2>/dev/null || printf '%s\n' "$1"; }
 clear_screen() {
@@ -252,6 +254,8 @@ build_alias_lines() {
   LINES+=("ADD"$'\t'"$ADD_ROW_LABEL")
   # Edit row, placed after ADD and before proxy/jump/aliases
   LINES+=("EDIT"$'\t'"$EDIT_ROW_LABEL")
+  # authorized_keys helper, placed after EDIT
+  LINES+=("AUTHKEYS"$'\t'"$AUTHKEYS_ROW_LABEL")
   # Proxy row, placed after ADD/EDIT and before jump/aliases
   LINES+=("PROXY"$'\t'"$PROXY_ROW_LABEL")
   # Jump mode row, placed after ADD/EDIT/PROXY and before aliases
@@ -670,7 +674,7 @@ ssherpa_edit_mode() {
   for l in "${LINES[@]:-}"; do
     token=$(printf '%s' "$l" | awk -F '\t' '{print $1}')
     case "$token" in
-      ADD|EDIT|PROXY|JUMP) continue ;;
+      ADD|EDIT|AUTHKEYS|PROXY|JUMP) continue ;;
     esac
     alias_lines+=("$l")
   done
@@ -752,7 +756,7 @@ ssherpa_jump_flow() {
   for l in "${LINES[@]:-}"; do
     token=$(printf '%s' "$l" | awk -F '\t' '{print $1}')
     case "$token" in
-      ADD|EDIT|PROXY|JUMP) continue ;;
+      ADD|EDIT|AUTHKEYS|PROXY|JUMP) continue ;;
     esac
     alias_lines+=("$l")
   done
@@ -945,7 +949,7 @@ ssherpa_proxy_flow() {
   for l in "${LINES[@]:-}"; do
     token=$(printf '%s' "$l" | awk -F '\t' '{print $1}')
     case "$token" in
-      ADD|EDIT|PROXY|JUMP) continue ;;
+      ADD|EDIT|AUTHKEYS|PROXY|JUMP) continue ;;
     esac
     alias_lines+=("$l")
   done
@@ -981,8 +985,560 @@ ssherpa_proxy_flow() {
   exec ssh -oPermitLocalCommand=yes -oLocalCommand="$local_cmd" -D "$port" -C -N "$remote" "${ssh_args[@]:-}"
 }
 
+authorized_keys_path_default() {
+  if [[ -n "${SSHERPA_AUTHORIZED_KEYS_PATH:-}" ]]; then
+    printf '%s\n' "$SSHERPA_AUTHORIZED_KEYS_PATH"
+  else
+    printf '%s\n' "$HOME/.ssh/authorized_keys"
+  fi
+}
+
+authkeys_parse_pubkey_line() {
+  # Input: single authorized_keys / .pub line.
+  # Output globals (on success): PUBKEY_TYPE, PUBKEY_DATA, PUBKEY_COMMENT, PUBKEY_FP.
+  local line="$1"
+  line=$(trim "$line")
+  [[ -z "$line" ]] && return 1
+  case "$line" in
+    \#*) return 1 ;;
+  esac
+  local words=()
+  IFS=' ' read -r -a words <<<"$line"
+  local n=${#words[@]}
+  [[ $n -lt 2 ]] && return 1
+  local i w key_type="" key_data="" comment=""
+  for ((i=0; i<n; i++)); do
+    w=${words[$i]}
+    case "$w" in
+      ssh-rsa|ssh-ed25519|ssh-dss|ecdsa-sha2-*|sk-ssh-ed25519@openssh.com|sk-ecdsa-sha2-nistp256@openssh.com)
+        key_type="$w"
+        if (( i + 1 < n )); then
+          key_data="${words[$((i+1))]}"
+        fi
+        if (( i + 2 < n )); then
+          comment="${words[*]:$((i+2))}"
+        fi
+        break
+        ;;
+    esac
+  done
+  if [[ -z "$key_type" || -z "$key_data" ]]; then
+    return 1
+  fi
+  PUBKEY_TYPE="$key_type"
+  PUBKEY_DATA="$key_data"
+  PUBKEY_COMMENT="$comment"
+  PUBKEY_FP="$PUBKEY_TYPE $PUBKEY_DATA"
+  return 0
+}
+
+authkeys_validate_parsed_pubkey() {
+  # Uses ssh-keygen when available; falls back to structural checks only.
+  if ! command -v ssh-keygen >/dev/null 2>&1; then
+    return 0
+  fi
+  local line="$PUBKEY_TYPE $PUBKEY_DATA"
+  if [[ -n "${PUBKEY_COMMENT:-}" ]]; then
+    line+=" $PUBKEY_COMMENT"
+  fi
+  printf '%s\n' "$line" | ssh-keygen -lf - >/dev/null 2>&1
+}
+
+authkeys_fp_in_array() {
+  # args: needle list...
+  local needle="$1" x
+  shift || true
+  for x in "$@"; do
+    [[ "$x" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+authkeys_load_existing_fps() {
+  # args: path
+  local path="$1" line
+  AUTHKEYS_EXISTING_FP=()
+  [[ -f "$path" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if authkeys_parse_pubkey_line "$line"; then
+      AUTHKEYS_EXISTING_FP+=("$PUBKEY_FP")
+    fi
+  done < "$path"
+}
+
+authkeys_collect_from_dir() {
+  # args: dir
+  local dir="$1"
+  AUTHKEYS_DIR_LINES=()
+  AUTHKEYS_DIR_FP=()
+  AUTHKEYS_DIR_SOURCE=()
+  AUTHKEYS_DIR_TOTAL=0
+  AUTHKEYS_DIR_INVALID=0
+  AUTHKEYS_DIR_DUPLICATE=0
+
+  local special="$dir/authorized_keys"
+  local files=() f
+  if [[ -d "$special" ]]; then
+    for f in "$special"/*; do
+      [[ -f "$f" ]] || continue
+      files+=("$f")
+    done
+  else
+    for f in "$dir"/*.pub; do
+      [[ -f "$f" ]] || continue
+      files+=("$f")
+    done
+  fi
+
+  if [[ ${#files[@]} -eq 0 ]]; then
+    return 1
+  fi
+
+  local line fp normalized exists
+  for f in "${files[@]}"; do
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line=$(trim "$line")
+      [[ -z "$line" ]] && continue
+      if ! authkeys_parse_pubkey_line "$line"; then
+        AUTHKEYS_DIR_INVALID=$((AUTHKEYS_DIR_INVALID+1))
+        continue
+      fi
+      if ! authkeys_validate_parsed_pubkey; then
+        AUTHKEYS_DIR_INVALID=$((AUTHKEYS_DIR_INVALID+1))
+        continue
+      fi
+      fp="$PUBKEY_FP"
+      exists=0
+      if authkeys_fp_in_array "$fp" "${AUTHKEYS_DIR_FP[@]:-}"; then
+        AUTHKEYS_DIR_DUPLICATE=$((AUTHKEYS_DIR_DUPLICATE+1))
+        continue
+      fi
+      normalized="$PUBKEY_TYPE $PUBKEY_DATA"
+      if [[ -n "${PUBKEY_COMMENT:-}" ]]; then
+        normalized+=" $PUBKEY_COMMENT"
+      fi
+      AUTHKEYS_DIR_LINES+=("$normalized")
+      AUTHKEYS_DIR_FP+=("$fp")
+      AUTHKEYS_DIR_SOURCE+=("$f")
+      AUTHKEYS_DIR_TOTAL=$((AUTHKEYS_DIR_TOTAL+1))
+    done < "$f"
+  done
+  return 0
+}
+
+authkeys_ensure_permissions() {
+  local path="$1"
+  chmod 600 "$path" 2>/dev/null || chmod 644 "$path" 2>/dev/null || true
+}
+
+authkeys_dir_has_keys() {
+  # args: dir
+  local dir="$1" special f
+  special="$dir/authorized_keys"
+  if [[ -d "$special" ]]; then
+    for f in "$special"/*; do
+      [[ -f "$f" ]] || continue
+      return 0
+    done
+  fi
+  for f in "$dir"/*.pub; do
+    [[ -f "$f" ]] || continue
+    return 0
+  done
+  return 1
+}
+
+ssherpa_authkeys_prompt_dir() {
+  # Sets AUTHKEYS_PROMPT_DIR_RESULT on success.
+  local title="$1" current dir
+  current="${AUTHKEYS_LAST_DIR:-${PWD:-$HOME}}"
+  while :; do
+    clear_screen
+    style_step "$title"
+    draw_rule
+    style_hint "Current directory:"
+    echo "  $current"
+    draw_rule
+    style_hint "Pick a folder. If it contains SSH .pub keys or an authorized_keys"
+    style_hint "subfolder, you'll be asked to confirm it as the key source."
+
+    local entries=() labels=() line idx choice
+
+    # Navigation: parent
+    if [[ "$current" != "/" ]]; then
+      entries+=("..")
+      labels+=(".. (up one level)")
+    fi
+
+    # Subdirectories
+    local d base
+    for d in "$current"/*; do
+      [[ -d "$d" ]] || continue
+      base=$(basename "$d")
+      labels+=("$base/")
+      entries+=("$d")
+    done
+
+    if [[ ${#entries[@]} -eq 0 ]]; then
+      if authkeys_dir_has_keys "$current"; then
+        style_hint "No subdirectories, but this folder contains SSH keys."
+        if gum confirm "Use $current as the key folder?"; then
+          AUTHKEYS_LAST_DIR="$current"
+          AUTHKEYS_PROMPT_DIR_RESULT="$current"
+          return 0
+        fi
+      fi
+      echo "[skipped] no subdirectories or SSH key files found under $current"
+      return 1
+    fi
+
+    local menu_lines=()
+    for idx in "${!entries[@]}"; do
+      menu_lines+=("$idx"$'\t'"${labels[$idx]}")
+    done
+
+    choice=$(printf '%s\n' "${menu_lines[@]}" | gum choose --header "Navigate to a folder with SSH keys") || {
+      echo "[skipped] no directory selected"
+      return 1
+    }
+    [[ -z "$choice" ]] && continue
+    idx=$(printf '%s' "$choice" | awk -F '\t' '{print $1}')
+    dir="${entries[$idx]}"
+
+    if [[ "$dir" == ".." ]]; then
+      current=$(dirname "$current")
+      continue
+    fi
+
+    if authkeys_dir_has_keys "$dir"; then
+      clear_screen
+      style_step "$title"
+      draw_rule
+      style_hint "Directory contains SSH public keys or authorized_keys files:"
+      echo "  $dir"
+      if gum confirm "Use this folder for authorized_keys operations?"; then
+        AUTHKEYS_LAST_DIR="$dir"
+        AUTHKEYS_PROMPT_DIR_RESULT="$dir"
+        return 0
+      fi
+      # Treat as navigation on cancel
+      current="$dir"
+      continue
+    fi
+
+    # No keys here; treat as navigation and re-render.
+    current="$dir"
+  done
+}
+
+ssherpa_authkeys_add_single() {
+  local auth_path="$1"
+  while :; do
+    clear_screen
+    style_step "authorized_keys — add a single key"
+    draw_rule
+    style_hint "Paste a single SSH public key line (ssh-ed25519, ssh-rsa, ecdsa…)."
+    style_hint "Example: ssh-ed25519 AAAAC3... you@device"
+    local line
+    line=$(gum input --placeholder "ssh-ed25519 AAAAC3... you@device")
+    line=$(trim "${line:-}")
+    if [[ -z "$line" ]]; then
+      echo "[skipped] empty key; nothing added"
+      gum input --placeholder "Press Enter to return to menu" >/dev/null 2>&1 || true
+      return 0
+    fi
+    if ! authkeys_parse_pubkey_line "$line"; then
+      gum style --foreground 196 "Not a recognized SSH public key line."
+      if gum confirm "Try again?"; then
+        continue
+      fi
+      return 0
+    fi
+    authkeys_validate_parsed_pubkey || gum style --foreground 214 "Key did not fully validate; format looks like an SSH key."
+    authkeys_load_existing_fps "$auth_path"
+    if authkeys_fp_in_array "$PUBKEY_FP" "${AUTHKEYS_EXISTING_FP[@]:-}"; then
+      clear_screen
+      style_step "authorized_keys — add a single key"
+      draw_rule
+      echo "[up-to-date] Key already present in $(authorized_keys_path_default)"
+      gum input --placeholder "Press Enter to return to menu" >/dev/null 2>&1 || true
+      return 0
+    fi
+    local normalized="$PUBKEY_TYPE $PUBKEY_DATA"
+    if [[ -n "${PUBKEY_COMMENT:-}" ]]; then
+      normalized+=" $PUBKEY_COMMENT"
+    fi
+    local tmp
+    tmp=$(mktemp)
+    if [[ -f "$auth_path" ]]; then
+      cp "$auth_path" "$tmp"
+    else
+      mkdir -p "$(dirname "$auth_path")"
+      printf '# Created by ssherpa authkeys\n' > "$tmp"
+    fi
+    printf '%s\n' "$normalized" >> "$tmp"
+    atomic_write_file "$tmp" "$auth_path"
+    rm -f "$tmp" 2>/dev/null || true
+    authkeys_ensure_permissions "$auth_path"
+    clear_screen
+    style_step "authorized_keys — add a single key"
+    draw_rule
+    echo "[added] 1 key to $auth_path"
+    gum input --placeholder "Press Enter to return to menu" >/dev/null 2>&1 || true
+    return 0
+  done
+}
+
+ssherpa_authkeys_add_from_dir() {
+  local auth_path="$1"
+  if ! ssherpa_authkeys_prompt_dir "authorized_keys — add from directory (merge)"; then
+    return 0
+  fi
+  local dir="$AUTHKEYS_PROMPT_DIR_RESULT"
+  if ! authkeys_collect_from_dir "$dir"; then
+    clear_screen
+    style_step "authorized_keys — add from directory"
+    draw_rule
+    echo "[skipped] No authorized_keys subfolder or *.pub files found in $dir"
+    gum input --placeholder "Press Enter to return to menu" >/dev/null 2>&1 || true
+    return 0
+  fi
+  authkeys_load_existing_fps "$auth_path"
+  local new_lines=() line fp
+  local i
+  for i in "${!AUTHKEYS_DIR_LINES[@]}"; do
+    fp="${AUTHKEYS_DIR_FP[$i]}"
+    line="${AUTHKEYS_DIR_LINES[$i]}"
+    if authkeys_fp_in_array "$fp" "${AUTHKEYS_EXISTING_FP[@]:-}"; then
+      continue
+    fi
+    new_lines+=("$line")
+  done
+  if [[ ${#new_lines[@]} -eq 0 ]]; then
+    clear_screen
+    style_step "authorized_keys — add from directory"
+    draw_rule
+    echo "[up-to-date] All keys from $dir are already present in $auth_path"
+    gum input --placeholder "Press Enter to return to menu" >/dev/null 2>&1 || true
+    return 0
+  fi
+  local tmp
+  tmp=$(mktemp)
+  if [[ -f "$auth_path" ]]; then
+    cp "$auth_path" "$tmp"
+  else
+    mkdir -p "$(dirname "$auth_path")"
+    printf '# Created by ssherpa authkeys\n' > "$tmp"
+  fi
+  for line in "${new_lines[@]}"; do
+    printf '%s\n' "$line" >> "$tmp"
+  done
+  atomic_write_file "$tmp" "$auth_path"
+  rm -f "$tmp" 2>/dev/null || true
+  authkeys_ensure_permissions "$auth_path"
+  clear_screen
+  style_step "authorized_keys — add from directory"
+  draw_rule
+  echo "[added] ${#new_lines[@]} new key(s) into $auth_path from $dir"
+  gum input --placeholder "Press Enter to return to menu" >/dev/null 2>&1 || true
+}
+
+ssherpa_authkeys_replace_from_dir() {
+  local auth_path="$1"
+  if ! ssherpa_authkeys_prompt_dir "authorized_keys — replace from directory (overwrite)"; then
+    return 0
+  fi
+  local dir="$AUTHKEYS_PROMPT_DIR_RESULT"
+  if ! authkeys_collect_from_dir "$dir"; then
+    clear_screen
+    style_step "authorized_keys — replace from directory"
+    draw_rule
+    echo "[skipped] No authorized_keys subfolder or *.pub files found in $dir"
+    gum input --placeholder "Press Enter to return to menu" >/dev/null 2>&1 || true
+    return 0
+  fi
+  clear_screen
+  style_step "authorized_keys — replace from directory"
+  draw_rule
+  style_hint "This will overwrite $(authorized_keys_path_default) with keys from:"
+  echo "  $dir"
+  echo
+  echo "Valid keys discovered: $AUTHKEYS_DIR_TOTAL"
+  echo "Invalid/ignored lines: $AUTHKEYS_DIR_INVALID"
+  echo "Duplicates (within dir): $AUTHKEYS_DIR_DUPLICATE"
+  echo
+  if ! gum confirm "Replace all entries in $(authorized_keys_path_default) with these keys?"; then
+    echo "[skipped] replace cancelled"
+    gum input --placeholder "Press Enter to return to menu" >/dev/null 2>&1 || true
+    return 0
+  fi
+  local tmp
+  tmp=$(mktemp)
+  mkdir -p "$(dirname "$auth_path")"
+  printf '# Managed by ssherpa authkeys — replaced from directory\n' > "$tmp"
+  local line
+  for line in "${AUTHKEYS_DIR_LINES[@]}"; do
+    printf '%s\n' "$line" >> "$tmp"
+  done
+  atomic_write_file "$tmp" "$auth_path"
+  rm -f "$tmp" 2>/dev/null || true
+  authkeys_ensure_permissions "$auth_path"
+  clear_screen
+  style_step "authorized_keys — replace from directory"
+  draw_rule
+  echo "[replaced] Wrote ${#AUTHKEYS_DIR_LINES[@]} key(s) to $auth_path from $dir"
+  gum input --placeholder "Press Enter to return to menu" >/dev/null 2>&1 || true
+}
+
+authkeys_scan_for_delete() {
+  # args: path
+  local path="$1" line
+  AUTHKEYS_ALL_LINES=()
+  AUTHKEYS_KEY_IDX=()
+  AUTHKEYS_KEY_DISPLAY=()
+  [[ -f "$path" ]] || return 1
+  local lineno=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    AUTHKEYS_ALL_LINES+=("$line")
+    if authkeys_parse_pubkey_line "$line"; then
+      local short="${PUBKEY_DATA:0:16}"
+      local disp="$PUBKEY_TYPE $short…"
+      if [[ -n "${PUBKEY_COMMENT:-}" ]]; then
+        disp+=" ($PUBKEY_COMMENT)"
+      fi
+      AUTHKEYS_KEY_IDX+=("$lineno")
+      AUTHKEYS_KEY_DISPLAY+=("$disp")
+    fi
+    lineno=$((lineno+1))
+  done < "$path"
+  [[ ${#AUTHKEYS_KEY_IDX[@]} -gt 0 ]]
+}
+
+ssherpa_authkeys_delete_keys() {
+  local auth_path="$1"
+  if ! authkeys_scan_for_delete "$auth_path"; then
+    clear_screen
+    style_step "authorized_keys — delete entries"
+    draw_rule
+    echo "[skipped] No authorized_keys file or no keys found at $auth_path"
+    gum input --placeholder "Press Enter to return to menu" >/dev/null 2>&1 || true
+    return 0
+  fi
+  local menu_lines=() i
+  for i in "${!AUTHKEYS_KEY_IDX[@]}"; do
+    menu_lines+=("$i"$'\t'"${AUTHKEYS_KEY_DISPLAY[$i]}")
+  done
+  menu_lines+=("BACK"$'\t'"Back without deleting")
+
+  clear_screen
+  style_step "authorized_keys — delete entries"
+  draw_rule
+  style_hint "Select one or more keys to remove from $(authorized_keys_path_default)."
+  style_hint "Space toggles, Enter confirms."
+  local selection
+  selection=$(printf '%s\n' "${menu_lines[@]}" | gum choose --no-limit --header "Select keys to delete") || {
+    echo "[skipped] delete cancelled"
+    gum input --placeholder "Press Enter to return to menu" >/dev/null 2>&1 || true
+    return 0
+  }
+  local sel_indices=() line token
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
+    token=$(printf '%s' "$line" | awk -F '\t' '{print $1}')
+    if [[ "$token" == "BACK" ]]; then
+      sel_indices=()
+      break
+    fi
+    sel_indices+=("$token")
+  done <<<"$selection"
+  if [[ ${#sel_indices[@]} -eq 0 ]]; then
+    echo "[skipped] no keys selected for delete"
+    gum input --placeholder "Press Enter to return to menu" >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  local chosen_lines=() idx
+  for idx in "${sel_indices[@]}"; do
+    chosen_lines+=("${AUTHKEYS_KEY_IDX[$idx]}")
+  done
+
+  local tmp
+  tmp=$(mktemp)
+  local total=${#AUTHKEYS_ALL_LINES[@]}
+  local ln i2 skip lno
+  lno=0
+  for ((i2=0; i2<total; i2++)); do
+    skip=0
+    for ln in "${chosen_lines[@]}"; do
+      if [[ "$lno" -eq "$ln" ]]; then
+        skip=1
+        break
+      fi
+    done
+    if [[ $skip -eq 0 ]]; then
+      printf '%s\n' "${AUTHKEYS_ALL_LINES[$i2]}" >> "$tmp"
+    fi
+    lno=$((lno+1))
+  done
+  atomic_write_file "$tmp" "$auth_path"
+  rm -f "$tmp" 2>/dev/null || true
+  authkeys_ensure_permissions "$auth_path"
+  clear_screen
+  style_step "authorized_keys — delete entries"
+  draw_rule
+  echo "[removed] ${#chosen_lines[@]} key(s) from $auth_path"
+  gum input --placeholder "Press Enter to return to menu" >/dev/null 2>&1 || true
+}
+
+ssherpa_authkeys_menu() {
+  local auth_path
+  auth_path=$(authorized_keys_path_default)
+  alt_screen_on
+  while :; do
+    clear_screen
+    style_step "authorized_keys manager"
+    draw_rule
+    style_hint "File: $auth_path"
+    style_hint "Manage which SSH keys can log into this device."
+    local choice
+    choice=$(printf '%s\n' \
+      "Add single key (paste)" \
+      "Add keys from directory (merge)" \
+      "Replace keys from directory (overwrite)" \
+      "Delete keys" \
+      "Back" | gum choose --header "authorized_keys manager") || {
+      alt_screen_off
+      echo "[skipped] authkeys cancelled"
+      return 0
+    }
+    case "$choice" in
+      "Add single key (paste)")
+        ssherpa_authkeys_add_single "$auth_path"
+        ;;
+      "Add keys from directory (merge)")
+        ssherpa_authkeys_add_from_dir "$auth_path"
+        ;;
+      "Replace keys from directory (overwrite)")
+        ssherpa_authkeys_replace_from_dir "$auth_path"
+        ;;
+      "Delete keys")
+        ssherpa_authkeys_delete_keys "$auth_path"
+        ;;
+      "Back")
+        alt_screen_off
+        return 0
+        ;;
+    esac
+  done
+}
+
 main() {
-  local sub=""; [[ $# -gt 0 ]] && case "$1" in add|edit) sub="$1"; shift ;; esac
+  local sub=""
+  if [[ $# -gt 0 ]]; then
+    case "$1" in
+      add|edit|authkeys) sub="$1"; shift ;;
+    esac
+  fi
   local include_patterns=0 do_print=0 do_exec=1 filter_user="" no_color=0 prefilter="" cfg_path="" ssh_args=()
   local alias="" host="" user="" port="" ident="" dry_run=0 yes=0
   while [[ $# -gt 0 ]]; do
@@ -1015,6 +1571,12 @@ main() {
     esac
   done
 
+  if [[ "$sub" == "authkeys" ]]; then
+    ensure_gum || exit 1
+    ssherpa_authkeys_menu
+    exit 0
+  fi
+
   ensure_gum || exit 1
 
   # Load config (used by both main and edit flows)
@@ -1041,10 +1603,14 @@ main() {
   if [[ $acount -eq 0 ]]; then
     while true; do
       local choice
-      choice=$(printf '%s\n' "Add alias" "Learn more" "Exit" | gum choose --header "No SSH aliases found") || { echo "[skipped] no selection made"; exit 0; }
+      choice=$(printf '%s\n' "Add alias" "Manage authorized_keys" "Learn more" "Exit" | gum choose --header "No SSH aliases found") || { echo "[skipped] no selection made"; exit 0; }
       case "$choice" in
         "Add alias")
           ssherpa_add_flow "" "" "" "" "" "${cfg_path:-}" 0 0
+          exit 0
+          ;;
+        "Manage authorized_keys")
+          ssherpa_authkeys_menu
           exit 0
           ;;
         "Learn more")
@@ -1115,7 +1681,7 @@ EOF
 
   # Show via gum filter
   local chosen
-  chosen=$(printf '%s\n' "${LINES[@]}" | gum filter --placeholder "Filter SSH aliases…" --header "Pick an SSH alias, or ADD/EDIT/PROXY/JUMP" --limit 1)
+  chosen=$(printf '%s\n' "${LINES[@]}" | gum filter --placeholder "Filter SSH aliases…" --header "Pick an SSH alias, or ADD/EDIT/AUTHKEYS/PROXY/JUMP" --limit 1)
   if [[ -z "$chosen" ]]; then
     echo "[skipped] no selection made"
     exit 0
@@ -1132,6 +1698,9 @@ EOF
       ;;
     EDIT)
       ssherpa_edit_mode "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${cfg_path:-}"
+      ;;
+    AUTHKEYS)
+      ssherpa_authkeys_menu
       ;;
     PROXY)
       ssherpa_proxy_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${ssh_args[@]:-}"
