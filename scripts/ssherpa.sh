@@ -394,15 +394,43 @@ suggest_alias_from_host() {
 
 list_private_keys() {
   local dir="$HOME/.ssh"
-  local f
-  local out=()
-  if [[ -d "$dir" ]]; then
+  local out=() f pub priv line seen=$'\n'
+  [[ -d "$dir" ]] || { printf '%s\n' "${out[@]:-}"; return 0; }
+
+  # Prefer any private key that has a matching valid .pub file.
+  local oldshopt
+  oldshopt=$(shopt -p nullglob || true)
+  shopt -s nullglob
+  for pub in "$dir"/*.pub; do
+    [[ -f "$pub" ]] || continue
+    line=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line=$(trim "$line")
+      [[ -z "$line" ]] && continue
+      break
+    done < "$pub"
+    [[ -n "$line" ]] || continue
+    if authkeys_parse_pubkey_line "$line" && authkeys_validate_parsed_pubkey; then
+      priv="${pub%.pub}"
+      if [[ -f "$priv" ]]; then
+        case "$seen" in *$'\n'"$priv"$'\n'*) : ;; *)
+          out+=("$priv")
+          seen+="$priv"$'\n'
+        esac
+      fi
+    fi
+  done
+
+  # Fallback to legacy id_* scan if no pub-paired keys found.
+  if [[ ${#out[@]} -eq 0 ]]; then
     for f in "$dir"/id_*; do
       [[ -e "$f" ]] || continue
       case "$f" in *.pub) continue ;; esac
       out+=("$f")
     done
   fi
+
+  eval "$oldshopt" 2>/dev/null || true
   printf '%s\n' "${out[@]:-}"
 }
 
@@ -1152,6 +1180,21 @@ ssherpa_authkeys_prompt_dir() {
   # Sets AUTHKEYS_PROMPT_DIR_RESULT on success.
   local title="$1" current dir
   current="${AUTHKEYS_LAST_DIR:-${PWD:-$HOME}}"
+
+  # If we're already in a folder with keys, offer to use it immediately.
+  if authkeys_dir_has_keys "$current"; then
+    clear_screen
+    style_step "$title"
+    draw_rule
+    style_hint "Directory contains SSH public keys or authorized_keys files:"
+    echo "  $current"
+    if gum confirm "Use this folder for authorized_keys operations?"; then
+      AUTHKEYS_LAST_DIR="$current"
+      AUTHKEYS_PROMPT_DIR_RESULT="$current"
+      return 0
+    fi
+    # If no, fall through into directory navigation below.
+  fi
   while :; do
     clear_screen
     style_step "$title"
