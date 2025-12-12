@@ -10,3 +10,4 @@ gpgobble	debian,macos	yes	Bulk import public keys and set ownertrust FULL (4) fo
 killport	debian,macos	yes	Free a port by killing listeners
 ssherpa	debian,macos	no	Alias-first SSH picker + interactive config writer
 hostshelper	debian,macos	no	Manage /etc/hosts entries with gum presets
+yeet	debian,macos	yes	Interactive flash drive ejector with gum multi-select

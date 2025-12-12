@@ -389,7 +389,7 @@ done < "$REGISTRY_FILE"
 
 # When not including experimental tools, filter to the stable set
 if [[ $include_exp -eq 0 ]]; then
-    stable_names=("uuid" "forgit" "gpgobble" "killport" "hostshelper" "ssherpa" "passage" "zapp" "zapper")
+    stable_names=("uuid" "forgit" "gpgobble" "killport" "hostshelper" "ssherpa" "passage" "yeet" "zapp" "zapper")
     filtered_scripts=()
     filtered_has_deps=()
     filtered_desc=()

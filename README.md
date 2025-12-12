@@ -38,6 +38,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
   - [killport](#killport)
   - [hostshelper](#hostshelper)
   - [ssherpa](#ssherpa)
+  - [yeet](#yeet)
   - [passage](#passage)
   - [uuid](#uuid)
   - [zapp](#zapp)
@@ -67,6 +68,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 | `killport` | ✅ stable | Free a TCP/UDP port with gum selection, TERM→KILL, and wait | macOS, Debian/Ubuntu | `lsof` (Linux optionally `iproute2` for `ss`) |
 | `hostshelper` | ✅ stable | Save host/IP pairs + presets and write them into `/etc/hosts` | macOS, Debian/Ubuntu | none (gum UI; sudo to write `/etc/hosts`) |
 | `ssherpa` | ✅ stable | Alias-first SSH host picker + interactive config writer | macOS, Debian/Ubuntu | none (gum UI only) |
+| `yeet` | ✅ stable | Eject removable flash drives with gum multi‑select | macOS, Debian/Ubuntu | `udisks2` (Linux) |
 | `passage` | ✅ stable | Interactive GNU Pass browser with pins and MRU; copy or reveal password; built‑in TOTP (MFA) helpers | macOS, Debian/Ubuntu | `pass`, `oathtool`, platform clipboard utility |
 | `uuid` | ✅ stable | Create and copy a fresh UUID without leaving the terminal | macOS, Debian/Ubuntu | `uuidgen` (or Python 3), clipboard tool (`pbcopy`/`xclip`/`xsel`) |
 | `zapp` | ✅ stable | Launch an AppImage or unpacked app stored under `~/zapps` | Debian/Ubuntu | none |
@@ -144,6 +146,19 @@ Notes
 - Gum-only UI; no fzf. It parses `Host`, `HostName`, `User`, `Port`, and first `IdentityFile`. `Match` blocks are ignored.
 - Labels show `user@host:port [key]` when present; connection is always `ssh <alias>` so your config fully applies.
 - Entries with `User git` are hidden by default; set `SSHERPA_IGNORE_USER_GIT=0` in your shell config to include them.
+
+### yeet
+
+`yeet` scans for removable USB drives and lets you eject one or more at once with a gum multi‑select UI. It shows a friendly volume/device name alongside the raw device path, then safely ejects via `diskutil eject` on macOS or `udisksctl power-off`/`eject` on Linux.
+
+Usage
+
+```bash
+yeet   # select one or more drives to eject
+```
+
+Notes
+- On Linux, `udisksctl` is preferred; `eject` is used as a fallback.
 
 Passage’s built‑in TOTP support uses the same `/mfa` convention as the former `mfa` helper. To make MFA work smoothly you need:
 
