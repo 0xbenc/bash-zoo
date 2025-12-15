@@ -33,6 +33,56 @@ EOF
 
 echo_err() { printf '%s\n' "$*" >&2; }
 
+SSHERPA_SSH_CMD=(ssh)
+SSHERPA_SSH_CMD_STR="ssh"
+
+ssherpa_debug() {
+  if [[ "${SSHERPA_DEBUG:-0}" != "0" ]]; then
+    echo_err "[debug] $*"
+  fi
+}
+
+ssherpa_init_ssh_cmd() {
+  SSHERPA_SSH_CMD=(ssh)
+  SSHERPA_SSH_CMD_STR="ssh"
+
+  local term="${TERM:-}"
+  if [[ -n "${KITTY_WINDOW_ID:-}" || -n "${KITTY_PID:-}" || "$term" == xterm-kitty* ]]; then
+    # Inside Kitty, prefer `kitten ssh` (no remote control needed).
+    if command -v kitten >/dev/null 2>&1; then
+      SSHERPA_SSH_CMD=(kitten ssh)
+      SSHERPA_SSH_CMD_STR="kitten ssh"
+    elif command -v kitty >/dev/null 2>&1; then
+      SSHERPA_SSH_CMD=(kitty +kitten ssh)
+      SSHERPA_SSH_CMD_STR="kitty +kitten ssh"
+    fi
+  fi
+
+  ssherpa_debug "TERM=${term:-} KITTY_WINDOW_ID=${KITTY_WINDOW_ID:-} KITTY_PID=${KITTY_PID:-}"
+  ssherpa_debug "ssh_cmd=$SSHERPA_SSH_CMD_STR"
+}
+
+ssherpa_run_ssh() {
+  # Runs SSH and optionally falls back to plain `ssh` if kitty's wrapper fails.
+  # Args: ssh args...
+  local args=("$@")
+  local status=0
+
+  # `set -e` would abort on a non-zero exit; capture the status explicitly.
+  if "${SSHERPA_SSH_CMD[@]}" "${args[@]}"; then
+    return 0
+  fi
+  status=$?
+
+  if [[ "$SSHERPA_SSH_CMD_STR" != "ssh" && "${SSHERPA_KITTY_SSH_FALLBACK:-1}" != "0" ]]; then
+    echo_err "[warn] $SSHERPA_SSH_CMD_STR exited $status; retrying with plain ssh (set SSHERPA_KITTY_SSH_FALLBACK=0 to disable)"
+    ssh "${args[@]}"
+    return $?
+  fi
+
+  return $status
+}
+
 ensure_gum() {
   if command -v gum >/dev/null 2>&1; then return 0; fi
   echo_err "gum is required. Install it with Homebrew:"
@@ -284,10 +334,10 @@ build_alias_lines() {
   # Prefilter by substring
   if [[ -n "$prefilter" ]]; then
     local tmp=() l
-    for l in "${LINES[@]:-}"; do
+    for l in "${LINES[@]}"; do
       case "$l" in *"$prefilter"*) tmp+=("$l") ;; esac
     done
-    LINES=("${tmp[@]:-}")
+    LINES=("${tmp[@]}")
   fi
 }
 
@@ -325,7 +375,7 @@ delete_alias_everywhere() {
   # args: alias dry_run
   local alias="$1" dry_run="${2:-0}"
   local cfg tmp changed any=0
-  for cfg in "${CONFIG_FILES[@]:-}"; do
+  for cfg in "${CONFIG_FILES[@]}"; do
     [[ -f "$cfg" ]] || continue
     tmp=$(mktemp)
     remove_alias_from_config_stream "$alias" < "$cfg" > "$tmp"
@@ -395,7 +445,7 @@ suggest_alias_from_host() {
 list_private_keys() {
   local dir="$HOME/.ssh"
   local out=() f pub priv line seen=$'\n'
-  [[ -d "$dir" ]] || { printf '%s\n' "${out[@]:-}"; return 0; }
+  [[ -d "$dir" ]] || { printf '%s\n' "${out[@]}"; return 0; }
 
   # Prefer any private key that has a matching valid .pub file.
   local oldshopt
@@ -431,7 +481,7 @@ list_private_keys() {
   fi
 
   eval "$oldshopt" 2>/dev/null || true
-  printf '%s\n' "${out[@]:-}"
+  printf '%s\n' "${out[@]}"
 }
 
 ssherpa_add_flow() {
@@ -699,7 +749,7 @@ ssherpa_edit_mode() {
   # Build alias list (same presets as main view), then drop synthetic rows.
   build_alias_lines "$include_patterns" "$filter_user" "$prefilter" "$no_color"
   local alias_lines=() l token
-  for l in "${LINES[@]:-}"; do
+  for l in "${LINES[@]}"; do
     token=$(printf '%s' "$l" | awk -F '\t' '{print $1}')
     case "$token" in
       ADD|EDIT|AUTHKEYS|PROXY|JUMP) continue ;;
@@ -781,7 +831,7 @@ ssherpa_jump_flow() {
   # Build a fresh alias list with current filters, then drop synthetic rows.
   build_alias_lines "$include_patterns" "$filter_user" "$prefilter" "$no_color"
   local alias_lines=() l token
-  for l in "${LINES[@]:-}"; do
+  for l in "${LINES[@]}"; do
     token=$(printf '%s' "$l" | awk -F '\t' '{print $1}')
     case "$token" in
       ADD|EDIT|AUTHKEYS|PROXY|JUMP) continue ;;
@@ -933,9 +983,9 @@ ssherpa_jump_flow() {
   if [[ "$do_print" -eq 1 ]]; then
     alt_screen_off
     if [[ -n "$jump_arg" ]]; then
-      echo "[print] ssh -J $jump_arg $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
+      echo "[print] $SSHERPA_SSH_CMD_STR -J $jump_arg $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
     else
-      echo "[print] ssh $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
+      echo "[print] $SSHERPA_SSH_CMD_STR $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
     fi
     return 0
   fi
@@ -943,11 +993,13 @@ ssherpa_jump_flow() {
   if [[ "$do_exec" -eq 1 ]]; then
     alt_screen_off
     if [[ -n "$jump_arg" ]]; then
-      echo "[exec] ssh -J $jump_arg $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
-      exec ssh -J "$jump_arg" "$dest_token" "${jump_ssh_args[@]:-}"
+      echo "[exec] $SSHERPA_SSH_CMD_STR -J $jump_arg $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
+      ssherpa_run_ssh -J "$jump_arg" "$dest_token" "${jump_ssh_args[@]}"
+      return $?
     else
-      echo "[exec] ssh $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
-      exec ssh "$dest_token" "${jump_ssh_args[@]:-}"
+      echo "[exec] $SSHERPA_SSH_CMD_STR $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
+      ssherpa_run_ssh "$dest_token" "${jump_ssh_args[@]}"
+      return $?
     fi
   fi
 
@@ -974,7 +1026,7 @@ ssherpa_proxy_flow() {
   # Build alias list (same presets as main view), then drop synthetic rows.
   build_alias_lines "$include_patterns" "$filter_user" "$prefilter" "$no_color"
   local alias_lines=() l token
-  for l in "${LINES[@]:-}"; do
+  for l in "${LINES[@]}"; do
     token=$(printf '%s' "$l" | awk -F '\t' '{print $1}')
     case "$token" in
       ADD|EDIT|AUTHKEYS|PROXY|JUMP) continue ;;
@@ -1003,14 +1055,15 @@ ssherpa_proxy_flow() {
   local remote="$alias"
 
   gum style --bold --foreground 212 "Starting SSH SOCKS proxy"
-  gum style --faint "Command: ssh -D $port -C -N $remote${ssh_args:+ }${ssh_args[*]:-}"
+  gum style --faint "Command: $SSHERPA_SSH_CMD_STR -D $port -C -N $remote${ssh_args:+ }${ssh_args[*]:-}"
   gum style --faint "Press Ctrl-C to stop the proxy."
 
   # After SSH successfully connects, run a local gum command to announce it.
   local local_cmd
   local_cmd="gum style --foreground 46 'Proxy connected on port $port.'"
 
-  exec ssh -oPermitLocalCommand=yes -oLocalCommand="$local_cmd" -D "$port" -C -N "$remote" "${ssh_args[@]:-}"
+  ssherpa_run_ssh -oPermitLocalCommand=yes -oLocalCommand="$local_cmd" -D "$port" -C -N "$remote" "${ssh_args[@]}"
+  return $?
 }
 
 authorized_keys_path_default() {
@@ -1137,7 +1190,7 @@ authkeys_collect_from_dir() {
       fi
       fp="$PUBKEY_FP"
       exists=0
-      if authkeys_fp_in_array "$fp" "${AUTHKEYS_DIR_FP[@]:-}"; then
+      if authkeys_fp_in_array "$fp" "${AUTHKEYS_DIR_FP[@]}"; then
         AUTHKEYS_DIR_DUPLICATE=$((AUTHKEYS_DIR_DUPLICATE+1))
         continue
       fi
@@ -1299,7 +1352,7 @@ ssherpa_authkeys_add_single() {
     fi
     authkeys_validate_parsed_pubkey || gum style --foreground 214 "Key did not fully validate; format looks like an SSH key."
     authkeys_load_existing_fps "$auth_path"
-    if authkeys_fp_in_array "$PUBKEY_FP" "${AUTHKEYS_EXISTING_FP[@]:-}"; then
+    if authkeys_fp_in_array "$PUBKEY_FP" "${AUTHKEYS_EXISTING_FP[@]}"; then
       clear_screen
       style_step "authorized_keys — add a single key"
       draw_rule
@@ -1352,7 +1405,7 @@ ssherpa_authkeys_add_from_dir() {
   for i in "${!AUTHKEYS_DIR_LINES[@]}"; do
     fp="${AUTHKEYS_DIR_FP[$i]}"
     line="${AUTHKEYS_DIR_LINES[$i]}"
-    if authkeys_fp_in_array "$fp" "${AUTHKEYS_EXISTING_FP[@]:-}"; then
+    if authkeys_fp_in_array "$fp" "${AUTHKEYS_EXISTING_FP[@]}"; then
       continue
     fi
     new_lines+=("$line")
@@ -1576,6 +1629,8 @@ ssherpa_authkeys_menu() {
 }
 
 main() {
+  ssherpa_init_ssh_cmd
+
   local sub=""
   if [[ $# -gt 0 ]]; then
     case "$1" in
@@ -1746,10 +1801,10 @@ EOF
       ssherpa_authkeys_menu
       ;;
     PROXY)
-      ssherpa_proxy_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${ssh_args[@]:-}"
+      ssherpa_proxy_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${ssh_args[@]}"
       ;;
     JUMP)
-      ssherpa_jump_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "$do_print" "$do_exec" "${ssh_args[@]:-}"
+      ssherpa_jump_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "$do_print" "$do_exec" "${ssh_args[@]}"
       ;;
     *)
       local alias
@@ -1766,11 +1821,12 @@ EOF
       local disp=""; [[ -n "$user" ]] && disp+="$user@"; disp+="$host"; [[ -n "$port" ]] && disp+=":$port"
       echo "[selected] $alias → ${disp:-$alias}"
       if [[ $do_print -eq 1 ]]; then
-        echo "[print] ssh $alias${ssh_args:+ }${ssh_args[*]:-}"; exit 0
+        echo "[print] $SSHERPA_SSH_CMD_STR $alias${ssh_args:+ }${ssh_args[*]:-}"; exit 0
       fi
       if [[ $do_exec -eq 1 ]]; then
-        echo "[exec] ssh $alias${ssh_args:+ }${ssh_args[*]:-}"
-        exec ssh "$alias" "${ssh_args[@]:-}"
+        echo "[exec] $SSHERPA_SSH_CMD_STR $alias${ssh_args:+ }${ssh_args[*]:-}"
+        ssherpa_run_ssh "$alias" "${ssh_args[@]}"
+        exit $?
       fi
       ;;
   esac
