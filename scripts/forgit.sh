@@ -15,23 +15,75 @@ usage() {
 forgit: find repos with work to finish
 
 Usage:
-  forgit [PATH]
+  forgit [--timeout-secs N] [PATH]
 
 Checks PATH (default: current directory) recursively for Git repositories
 and reports any that have uncommitted changes or commits not pushed to
 their upstream. Shows the current branch for each flagged repository.
 Exits with code 1 if any issues are found, else 0.
 
+Options:
+  -t, --timeout-secs N  Per-repo remote check timeout in seconds (default: 10)
+
 Environment:
   NO_COLOR=1    Disable colored output
   FORGIT_NO_NETWORK=1  Skip remote checks (no network)
+  FORGIT_TIMEOUT_SECS=10  Default timeout if -t/--timeout-secs not provided
 EOF
 }
 
-start_dir="${1:-.}"
-if [[ "$start_dir" == "-h" || "$start_dir" == "--help" ]]; then
-  usage
-  exit 0
+# Defaults (CLI overrides env; env overrides built-in default)
+start_dir="."
+timeout_secs="${FORGIT_TIMEOUT_SECS:-10}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -t|--timeout|--timeout-secs)
+      opt="$1"
+      shift
+      if [[ $# -lt 1 ]]; then
+        echo "Error: missing value for $opt" >&2
+        exit 2
+      fi
+      timeout_secs="$1"
+      ;;
+    --timeout=*|--timeout-secs=*)
+      timeout_secs="${1#*=}"
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "Error: unknown option: $1" >&2
+      echo "Run: forgit --help" >&2
+      exit 2
+      ;;
+    *)
+      if [[ "$start_dir" != "." ]]; then
+        echo "Error: multiple PATH arguments provided" >&2
+        echo "Run: forgit --help" >&2
+        exit 2
+      fi
+      start_dir="$1"
+      ;;
+  esac
+  shift
+done
+
+if [[ $# -gt 0 ]]; then
+  echo "Error: unexpected arguments: $*" >&2
+  echo "Run: forgit --help" >&2
+  exit 2
+fi
+
+if [[ ! "$timeout_secs" =~ ^[0-9]+$ ]] || [[ "$timeout_secs" -lt 1 ]]; then
+  echo "Error: --timeout-secs must be a positive integer (got: $timeout_secs)" >&2
+  exit 2
 fi
 
 if [[ ! -d "$start_dir" ]]; then
@@ -139,6 +191,27 @@ cat >"$scan_script" <<'EOS'
 set -euo pipefail
 repo="$1"
 no_network="${2:-}"
+timeout_secs="${3:-10}"
+
+run_with_timeout() { # $1=seconds, rest=command...
+  local secs="$1"
+  shift
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+    return $?
+  fi
+  if command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$secs" "$@"
+    return $?
+  fi
+  if command -v perl >/dev/null 2>&1; then
+    perl -e 'alarm shift; exec @ARGV' "$secs" "$@"
+    return $?
+  fi
+
+  "$@"
+}
 
 has_changes=0
 has_remote_issue=0
@@ -179,9 +252,11 @@ if [[ -n "$branch_name" ]]; then
     remote_failed=0
     remote_commit=""
     if [[ $do_network -eq 1 ]]; then
-      remote_commit="$(GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes" \
-        git -C "$repo" ls-remote --exit-code "$up_remote" "$up_merge" 2>/dev/null \
-        | awk 'NR==1 {print $1}' || true)"
+      ls_remote_out="$(GIT_TERMINAL_PROMPT=0 \
+        GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=${timeout_secs} -o ConnectionAttempts=1" \
+        run_with_timeout "$timeout_secs" \
+        git -C "$repo" ls-remote --exit-code "$up_remote" "$up_merge" 2>/dev/null || true)"
+      remote_commit="$(printf '%s\n' "$ls_remote_out" | awk 'NR==1 {print $1}' || true)"
       if [[ -z "$remote_commit" ]]; then remote_failed=1; fi
     else
       remote_failed=1
@@ -258,10 +333,10 @@ for repo in "${repos[@]}"; do
   # Run the single-repo scan under gum spin when available
   res=""
   if [[ $use_gum -eq 1 ]]; then
-    res=$(gum spin --spinner points --title "$title" -- bash "$scan_script" "$repo" "${FORGIT_NO_NETWORK:-}")
+    res=$(gum spin --spinner points --title "$title" -- bash "$scan_script" "$repo" "${FORGIT_NO_NETWORK:-}" "$timeout_secs")
   else
     progress_update "$title"
-    res=$(bash "$scan_script" "$repo" "${FORGIT_NO_NETWORK:-}")
+    res=$(bash "$scan_script" "$repo" "${FORGIT_NO_NETWORK:-}" "$timeout_secs")
   fi
 
   # Parse results: has_changes, has_remote_issue, ahead_state, behind_state, branch_disp
