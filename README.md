@@ -1,31 +1,32 @@
-# 🐚 Bash Zoo
+# bash-zoo
 
-<p align="center">
+<p align="left">
   <a href="https://github.com/0xbenc/bash-zoo">
-    <img src="https://img.shields.io/badge/Bash-CLI%20toolkit-222831?style=for-the-badge&logo=gnu-bash&logoColor=white" alt="Bash" />
+    <img src="https://img.shields.io/badge/bash-CLI%20toolkit-4EAA25?style=flat-square&logo=gnu-bash&logoColor=white" alt="Bash" />
   </a>
   <a href="#platform-support">
-    <img src="https://img.shields.io/badge/macOS%20%7C%20Debian-supported-6C63FF?style=for-the-badge" alt="Platforms" />
+    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Debian-6C63FF?style=flat-square" alt="Platforms" />
   </a>
   <a href="LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-orange?style=for-the-badge" alt="License" />
+    <img src="https://img.shields.io/github/license/0xbenc/bash-zoo?style=flat-square" alt="License" />
   </a>
 </p>
 
-```txt
- :::====  :::====  :::===  :::  ===      :::===== :::====  :::==== 
- :::  === :::  === :::     :::  ===           === :::  === :::  ===
- =======  ========  =====  ========         ===   ===  === ===  ===
- ===  === ===  ===     === ===  ===       ===     ===  === ===  ===
- =======  ===  === ======  ===  ===      ========  ======   ======
-```                                                             
+## TLDR
 
-> Let's start shipping
+The prerequisites are `brew`, `figlet`, and `gum`. 
 
-## TL;DR
+The installer below will guide you through the prereqs if you don't have them.
 
 ```bash
-git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
+curl -fsSL https://raw.githubusercontent.com/0xbenc/bash-zoo/HEAD/install-remote.sh | sh
+
+# pass install.sh flags like this:
+# curl -fsSL https://raw.githubusercontent.com/0xbenc/bash-zoo/HEAD/install-remote.sh | sh -s -- --all
+
+git clone https://github.com/0xbenc/bash-zoo.git
+cd bash-zoo
+./install.sh
 ```
 
 ## Table of Contents
@@ -49,6 +50,7 @@ git clone https://github.com/0xbenc/bash-zoo.git && cd bash-zoo && ./install.sh
 - [Upgrading](#upgrading)
 - [Uninstall](#uninstall)
 - [Meta CLI](#meta-cli)
+- [Dependencies & References](#dependencies--references)
 - [Credits](#credits)
 - [License](#license)
 
@@ -276,6 +278,11 @@ Prerequisites
 ### Option A — Guided installer (recommended)
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/0xbenc/bash-zoo/HEAD/install-remote.sh | sh
+
+# pass install.sh flags like this:
+# curl -fsSL https://raw.githubusercontent.com/0xbenc/bash-zoo/HEAD/install-remote.sh | sh -s -- --all
+
 git clone https://github.com/0xbenc/bash-zoo
 cd bash-zoo
 ./install.sh
@@ -370,16 +377,6 @@ The interactive uninstaller uses `gum` and also includes an "All" option for qui
 
 Then restart your shell so aliases disappear: `exec "$SHELL" -l`.
 
-## Credits
-
-- [Vik Bhaduri](https://github.com/basedvik) — Contributor
-- [Ben Chapman](https://github.com/0xbenc) — Maintainer
-- [Ben Cully](https://github.com/BenCully) — Contributor
-
-
-## License
-
-[MIT](LICENSE)
 ## Meta CLI
 
 `bash-zoo` is an always-installed meta CLI:
@@ -387,7 +384,7 @@ Then restart your shell so aliases disappear: `exec "$SHELL" -l`.
 - `bash-zoo version` — print the installed meta CLI version.
 - `bash-zoo uninstall [--all]` — remove installed tools and aliases without needing the repo.
 - `bash-zoo update passwords` — run `git pull` in each first-level folder of `~/.password-store` and summarize results.
- - `bash-zoo update zoo` — refresh installed tools and the meta CLI from a source repo (or a local folder via `--from`).
+- `bash-zoo update zoo` — refresh installed tools and the meta CLI from a source repo (or a local folder via `--from`).
 
 Examples
 
@@ -397,3 +394,22 @@ bash-zoo update passwords
 bash-zoo update zoo --dry-run
 bash-zoo uninstall --all
 ```
+
+## Dependencies & References
+
+Bash Zoo depends on (and is inspired by) these upstream projects:
+
+- Homebrew Core: https://github.com/Homebrew/homebrew-core
+- Homebrew installer script: https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
+- figlet: https://www.figlet.org/
+- gum: https://github.com/charmbracelet/gum
+
+## Credits
+
+- [Vik Bhaduri](https://github.com/basedvik) — Contributor
+- [Ben Chapman](https://github.com/0xbenc) — Maintainer
+- [Ben Cully](https://github.com/BenCully) — Contributor
+
+## License
+
+[MIT](LICENSE)

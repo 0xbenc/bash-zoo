@@ -75,6 +75,9 @@ Reading is performed with portable `sed`/string ops (no JSON parser dependency).
 
 High-level flow:
 
+Bootstrap:
+- `install-remote.sh` is a POSIX `sh` wrapper for `curl ... | sh`: it clones the repo to a temp dir and runs `bash ./install.sh` (redirecting stdin from `/dev/tty` when piped so interactive prompts still work).
+
 1) Detect OS: macOS vs Debian-like Linux; bail out on unsupported.
 2) Option parsing: `--all`, `--exp`, `--names <csv>` allow non-interactive flows and experimental tool inclusion.
 3) Load registry `setup/registry.tsv` and filter tools by OS (and stability unless `--exp`).
