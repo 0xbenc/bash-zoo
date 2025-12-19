@@ -63,7 +63,7 @@ ssherpa_init_ssh_cmd() {
 }
 
 ssherpa_run_ssh() {
-  # Runs SSH and optionally falls back to plain `ssh` if kitty's wrapper fails.
+  # Runs SSH.
   # Args: ssh args...
   local args=("$@")
   local status=0
@@ -73,12 +73,6 @@ ssherpa_run_ssh() {
     return 0
   fi
   status=$?
-
-  if [[ "$SSHERPA_SSH_CMD_STR" != "ssh" && "${SSHERPA_KITTY_SSH_FALLBACK:-1}" != "0" ]]; then
-    echo_err "[warn] $SSHERPA_SSH_CMD_STR exited $status; retrying with plain ssh (set SSHERPA_KITTY_SSH_FALLBACK=0 to disable)"
-    ssh "${args[@]}"
-    return $?
-  fi
 
   return $status
 }
