@@ -328,12 +328,28 @@ require_prereqs_or_exit() {
   echo >&2
   echo "Install prerequisites, then re-run ./install.sh:" >&2
   if [[ $brew_missing -eq 1 ]]; then
+    echo '  # 1) Install Homebrew' >&2
     echo '  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' >&2
+    if [[ "${OS_TYPE}" == "macos" ]]; then
+      echo "  # 2) Put brew in PATH (choose one):" >&2
+      echo '  # Apple Silicon (zsh):' >&2
+      echo '  echo \'eval "$(/opt/homebrew/bin/brew shellenv)"\' >> ~/.zprofile' >&2
+      echo '  eval "$(/opt/homebrew/bin/brew shellenv)"' >&2
+      echo '  # Intel (zsh):' >&2
+      echo '  echo \'eval "$(/usr/local/bin/brew shellenv)"\' >> ~/.zprofile' >&2
+      echo '  eval "$(/usr/local/bin/brew shellenv)"' >&2
+      echo '  # Bash users: use ~/.bash_profile instead of ~/.zprofile' >&2
+    elif [[ "${OS_TYPE}" == "debian" ]]; then
+      echo "  # 2) Ensure brew is in PATH for this shell:" >&2
+      echo '  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >&2
+    fi
   fi
   if [[ $gum_missing -eq 1 ]]; then
+    echo '  # 3) Install gum' >&2
     echo '  brew install gum' >&2
   fi
   if [[ $figlet_missing -eq 1 ]]; then
+    echo '  # 4) Install figlet' >&2
     echo '  brew install figlet' >&2
   fi
   exit 1

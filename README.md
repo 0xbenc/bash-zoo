@@ -18,12 +18,17 @@ The prerequisites are `brew`, `figlet`, and `gum`.
 
 The installer below will guide you through the prereqs if you don't have them.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/0xbenc/bash-zoo/HEAD/install-remote.sh | sh
+```shell
+curl -fsSL https://bash.occ.farm | bash
+```
+or
 
-# pass install.sh flags like this:
-# curl -fsSL https://raw.githubusercontent.com/0xbenc/bash-zoo/HEAD/install-remote.sh | sh -s -- --all
+```shell
+curl -fsSL https://raw.githubusercontent.com/0xbenc/bash-zoo/HEAD/install-remote.sh | bash
+```
+or
 
+```shell
 git clone https://github.com/0xbenc/bash-zoo.git
 cd bash-zoo
 ./install.sh
@@ -267,6 +272,14 @@ Prerequisites
 - Install Homebrew, gum, and figlet before running the installer.
   - macOS
     - Install Homebrew: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
+    - Put `brew` in PATH (zsh):
+      - Apple Silicon:
+        - `echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile`
+        - `eval "$(/opt/homebrew/bin/brew shellenv)"`
+      - Intel:
+        - `echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.zprofile`
+        - `eval "$(/usr/local/bin/brew shellenv)"`
+      - Bash users: use `~/.bash_profile` instead of `~/.zprofile`
     - Install gum: `brew install gum`
     - Install figlet: `brew install figlet`
   - Debian/Ubuntu
