@@ -988,11 +988,19 @@ ssherpa_jump_flow() {
     alt_screen_off
     if [[ -n "$jump_arg" ]]; then
       echo "[exec] $SSHERPA_SSH_CMD_STR -J $jump_arg $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
-      ssherpa_run_ssh -J "$jump_arg" "$dest_token" "${jump_ssh_args[@]}"
+      if (( ${#jump_ssh_args[@]} )); then
+        ssherpa_run_ssh -J "$jump_arg" "$dest_token" "${jump_ssh_args[@]}"
+      else
+        ssherpa_run_ssh -J "$jump_arg" "$dest_token"
+      fi
       return $?
     else
       echo "[exec] $SSHERPA_SSH_CMD_STR $dest_token${jump_ssh_args:+ }${jump_ssh_args[*]:-}"
-      ssherpa_run_ssh "$dest_token" "${jump_ssh_args[@]}"
+      if (( ${#jump_ssh_args[@]} )); then
+        ssherpa_run_ssh "$dest_token" "${jump_ssh_args[@]}"
+      else
+        ssherpa_run_ssh "$dest_token"
+      fi
       return $?
     fi
   fi
@@ -1056,7 +1064,11 @@ ssherpa_proxy_flow() {
   local local_cmd
   local_cmd="gum style --foreground 46 'Proxy connected on port $port.'"
 
-  ssherpa_run_ssh -oPermitLocalCommand=yes -oLocalCommand="$local_cmd" -D "$port" -C -N "$remote" "${ssh_args[@]}"
+  if (( ${#ssh_args[@]} )); then
+    ssherpa_run_ssh -oPermitLocalCommand=yes -oLocalCommand="$local_cmd" -D "$port" -C -N "$remote" "${ssh_args[@]}"
+  else
+    ssherpa_run_ssh -oPermitLocalCommand=yes -oLocalCommand="$local_cmd" -D "$port" -C -N "$remote"
+  fi
   return $?
 }
 
@@ -1795,10 +1807,18 @@ EOF
       ssherpa_authkeys_menu
       ;;
     PROXY)
-      ssherpa_proxy_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${ssh_args[@]}"
+      if (( ${#ssh_args[@]} )); then
+        ssherpa_proxy_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${ssh_args[@]}"
+      else
+        ssherpa_proxy_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color"
+      fi
       ;;
     JUMP)
-      ssherpa_jump_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "$do_print" "$do_exec" "${ssh_args[@]}"
+      if (( ${#ssh_args[@]} )); then
+        ssherpa_jump_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "$do_print" "$do_exec" "${ssh_args[@]}"
+      else
+        ssherpa_jump_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "$do_print" "$do_exec"
+      fi
       ;;
     *)
       local alias
@@ -1819,7 +1839,11 @@ EOF
       fi
       if [[ $do_exec -eq 1 ]]; then
         echo "[exec] $SSHERPA_SSH_CMD_STR $alias${ssh_args:+ }${ssh_args[*]:-}"
-        ssherpa_run_ssh "$alias" "${ssh_args[@]}"
+        if (( ${#ssh_args[@]} )); then
+          ssherpa_run_ssh "$alias" "${ssh_args[@]}"
+        else
+          ssherpa_run_ssh "$alias"
+        fi
         exit $?
       fi
       ;;
