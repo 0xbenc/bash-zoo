@@ -54,7 +54,7 @@ cd bash-zoo
 | [hostshelper](docs/hostshelper.md) | ✅ stable | Save host/IP pairs + presets and write them into `/etc/hosts` | macOS, Debian/Ubuntu | none |
 | [ssherpa](docs/ssherpa.md) | ✅ stable | Alias-first SSH host picker + interactive config writer | macOS, Debian/Ubuntu | none |
 | [yeet](docs/yeet.md) | ✅ stable | Eject removable flash drives with gum multi‑select | macOS, Debian/Ubuntu | `udisks2` (Linux) |
-| [passage](docs/passage.md) | ✅ stable | Interactive GNU Pass browser with pins and MRU; copy or reveal password; built‑in TOTP (MFA) helpers | macOS, Debian/Ubuntu | `pass`, `oathtool`, platform clipboard utility |
+| [passage](docs/passage.md) | ✅ stable | Interactive GNU Pass browser with pins and MRU; jump-start filter with `passage <term>`; built‑in TOTP (MFA) helpers | macOS, Debian/Ubuntu | `pass`, `oathtool`, platform clipboard utility |
 | [uuid](docs/uuid.md) | ✅ stable | Create and copy a fresh UUID without leaving the terminal | macOS, Debian/Ubuntu | `uuidgen` (or Python 3), clipboard tool (`pbcopy`/`xclip`/`xsel`) |
 | [zapp](docs/zapp.md) | ✅ stable | Launch an AppImage or unpacked app stored under `~/zapps` | Debian/Ubuntu | none |
 | [zapper](docs/zapper.md) | ✅ stable | Prepare, validate, and register new apps for `zapp` with desktop entries | Debian/Ubuntu | `desktop-file-utils` |

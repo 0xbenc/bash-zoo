@@ -1386,7 +1386,7 @@ apply_mfa_only_filter() {
 }
 
 main_loop() {
-  local filter=""
+  local filter="${1-}"
   while true; do
     screen_clear
     load_listing_arrays "$filter"
@@ -1535,12 +1535,20 @@ main() {
   require_deps
   state_load
 
+  local initial_filter=""
+
   # If invoked as `passage mfa`, start directly in MFA-only mode.
+  # Any additional args seed the initial filter.
   if [[ ${1-} == "mfa" || ${1-} == "MFA" ]]; then
     MFA_ONLY=1
+    shift || true
   fi
 
-  main_loop
+  if [[ $# -gt 0 ]]; then
+    initial_filter="$*"
+  fi
+
+  main_loop "$initial_filter"
 }
 
 main "$@"

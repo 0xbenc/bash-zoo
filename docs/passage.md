@@ -6,6 +6,7 @@
 - Reveal the password on screen until you clear it (also copies to clipboard).
 - Toggle pin on an entry; pinned entries sort first.
 - Start directly in MFA-only view with `passage mfa`.
+- Start with an initial filter by passing arguments: `passage github` or `passage mfa github`.
 
 ## Notes
 
@@ -39,4 +40,3 @@ Passage’s built‑in TOTP support uses the same `/mfa` convention as the forme
 Once the store contains at least one `*/mfa` entry, run `passage mfa` to start directly in an MFA-only view, fuzzy-search the account, and copy the current 6‑digit code.
 
 Security note: Passage never passes your secret as a command argument. It reads the single-line secret from `pass` and feeds it to `oathtool` via stdin to avoid exposure in process listings.
-

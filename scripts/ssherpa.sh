@@ -1684,42 +1684,49 @@ main() {
   ensure_gum || exit 1
 
   # Load config (used by both main and edit flows)
-  load_config_files
-  [[ -n "${cfg_path:-}" ]] && CONFIG_FILES=("$cfg_path")
-  parse_configs
-
   if [[ "$sub" == "add" ]]; then
+    load_config_files
+    [[ -n "${cfg_path:-}" ]] && CONFIG_FILES=("$cfg_path")
+    parse_configs
     ssherpa_add_flow "$alias" "$host" "$user" "$port" "$ident" "${cfg_path:-}" "$dry_run" "$yes"
     exit 0
   fi
 
   if [[ "$sub" == "edit" ]]; then
+    load_config_files
+    [[ -n "${cfg_path:-}" ]] && CONFIG_FILES=("$cfg_path")
+    parse_configs
     ssherpa_edit_mode "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${cfg_path:-}"
     exit 0
   fi
 
-  # Build selection list (aliases only + synthetic add row)
-  build_alias_lines "$include_patterns" "$filter_user" "$prefilter" "$no_color"
-  local acount=${#NAMES[@]} line_count=${#LINES[@]}
-  echo "[loaded] $acount aliases"
+  while true; do
+    # Reload config each iteration so "Add…" returns to the updated list.
+    load_config_files
+    [[ -n "${cfg_path:-}" ]] && CONFIG_FILES=("$cfg_path")
+    parse_configs
 
-  # If there are zero aliases, present starter options: Add, Learn more, Exit
-  if [[ $acount -eq 0 ]]; then
-    while true; do
-      local choice
-      choice=$(printf '%s\n' "Add alias" "Manage authorized_keys" "Learn more" "Exit" | gum choose --header "No SSH aliases found") || { echo "[skipped] no selection made"; exit 0; }
-      case "$choice" in
-        "Add alias")
-          ssherpa_add_flow "" "" "" "" "" "${cfg_path:-}" 0 0
-          exit 0
-          ;;
-        "Manage authorized_keys")
-          ssherpa_authkeys_menu
-          exit 0
-          ;;
-        "Learn more")
-          if command -v gum >/dev/null 2>&1; then
-            gum pager <<'EOF'
+    # Build selection list (aliases only + synthetic rows)
+    build_alias_lines "$include_patterns" "$filter_user" "$prefilter" "$no_color"
+    local acount=${#NAMES[@]} line_count=${#LINES[@]}
+    echo "[loaded] $acount aliases"
+
+    # If there are zero aliases, present starter options: Add, Learn more, Exit
+    if [[ $acount -eq 0 ]]; then
+      while true; do
+        local choice
+        choice=$(printf '%s\n' "Add alias" "Manage authorized_keys" "Learn more" "Exit" | gum choose --header "No SSH aliases found") || { echo "[skipped] no selection made"; exit 0; }
+        case "$choice" in
+          "Add alias")
+            ssherpa_add_flow "" "" "" "" "" "${cfg_path:-}" 0 0
+            break
+            ;;
+          "Manage authorized_keys")
+            ssherpa_authkeys_menu
+            ;;
+          "Learn more")
+            if command -v gum >/dev/null 2>&1; then
+              gum pager <<'EOF'
 SSH and ssherpa — quick start
 
 What is SSH?
@@ -1755,8 +1762,8 @@ Tips
 
 Press q to close this help.
 EOF
-          else
-            printf '%s\n' \
+            else
+              printf '%s\n' \
 "SSH (Secure Shell) opens a secure terminal on another computer." \
 "ssherpa helps you save short names (aliases) so you can run 'ssh <alias>'" \
 "instead of 'ssh user@host -p 22 -i ~/.ssh/key'." \
@@ -1768,86 +1775,93 @@ EOF
 "  User farmer" \
 "  Port 22" \
 "  IdentityFile ~/.ssh/id_ed25519"
-          fi
-          ;;
-        "Exit")
-          echo "[skipped] user exited"
-          exit 0
-          ;;
-      esac
-    done
-  fi
-
-  if [[ $line_count -eq 0 ]]; then
-    echo "[skipped] no hosts match filter"
-    exit 2
-  fi
-
-  # Show via gum filter
-  local chosen
-  chosen=$(printf '%s\n' "${LINES[@]}" | gum filter --placeholder "Filter SSH aliases…" --header "Pick an SSH alias, or ADD/EDIT/AUTHKEYS/PROXY/JUMP" --limit 1)
-  if [[ -z "$chosen" ]]; then
-    echo "[skipped] no selection made"
-    exit 0
-  fi
-
-  # Extract token (left of tab) and display (right of tab)
-  local token display
-  token=$(printf '%s' "$chosen" | awk -F '\t' '{print $1}')
-  display=$(printf '%s' "$chosen" | awk -F '\t' '{print $2}')
-
-  case "$token" in
-    ADD)
-      ssherpa_add_flow "" "" "" "" "" "${cfg_path:-}" 0 0
-      ;;
-    EDIT)
-      ssherpa_edit_mode "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${cfg_path:-}"
-      ;;
-    AUTHKEYS)
-      ssherpa_authkeys_menu
-      ;;
-    PROXY)
-      if (( ${#ssh_args[@]} )); then
-        ssherpa_proxy_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${ssh_args[@]}"
-      else
-        ssherpa_proxy_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color"
-      fi
-      ;;
-    JUMP)
-      if (( ${#ssh_args[@]} )); then
-        ssherpa_jump_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "$do_print" "$do_exec" "${ssh_args[@]}"
-      else
-        ssherpa_jump_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "$do_print" "$do_exec"
-      fi
-      ;;
-    *)
-      local alias
-      alias="$token"
-      # Find entry for nicer log (best-effort)
-      local idx i user host port
-      idx=-1
-      for i in "${!NAMES[@]}"; do
-        if [[ "${NAMES[$i]}" == "$alias" ]]; then idx=$i; break; fi
+            fi
+            ;;
+          "Exit")
+            echo "[skipped] user exited"
+            exit 0
+            ;;
+        esac
       done
-      if [[ $idx -ge 0 ]]; then
-        user="${USERS[$idx]}"; host="${HOSTS[$idx]}"; port="${PORTS[$idx]}"
-      fi
-      local disp=""; [[ -n "$user" ]] && disp+="$user@"; disp+="$host"; [[ -n "$port" ]] && disp+=":$port"
-      echo "[selected] $alias → ${disp:-$alias}"
-      if [[ $do_print -eq 1 ]]; then
-        echo "[print] $SSHERPA_SSH_CMD_STR $alias${ssh_args:+ }${ssh_args[*]:-}"; exit 0
-      fi
-      if [[ $do_exec -eq 1 ]]; then
-        echo "[exec] $SSHERPA_SSH_CMD_STR $alias${ssh_args:+ }${ssh_args[*]:-}"
+      continue
+    fi
+
+    if [[ $line_count -eq 0 ]]; then
+      echo "[skipped] no hosts match filter"
+      exit 2
+    fi
+
+    # Show via gum filter
+    local chosen
+    chosen=$(printf '%s\n' "${LINES[@]}" | gum filter --placeholder "Filter SSH aliases…" --header "Pick an SSH alias, or ADD/EDIT/AUTHKEYS/PROXY/JUMP" --limit 1)
+    if [[ -z "$chosen" ]]; then
+      echo "[skipped] no selection made"
+      exit 0
+    fi
+
+    # Extract token (left of tab) and display (right of tab)
+    local token display
+    token=$(printf '%s' "$chosen" | awk -F '\t' '{print $1}')
+    display=$(printf '%s' "$chosen" | awk -F '\t' '{print $2}')
+
+    case "$token" in
+      ADD)
+        ssherpa_add_flow "" "" "" "" "" "${cfg_path:-}" 0 0
+        continue
+        ;;
+      EDIT)
+        ssherpa_edit_mode "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${cfg_path:-}"
+        continue
+        ;;
+      AUTHKEYS)
+        ssherpa_authkeys_menu
+        continue
+        ;;
+      PROXY)
         if (( ${#ssh_args[@]} )); then
-          ssherpa_run_ssh "$alias" "${ssh_args[@]}"
+          ssherpa_proxy_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "${ssh_args[@]}"
         else
-          ssherpa_run_ssh "$alias"
+          ssherpa_proxy_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color"
         fi
-        exit $?
-      fi
-      ;;
-  esac
+        continue
+        ;;
+      JUMP)
+        if (( ${#ssh_args[@]} )); then
+          ssherpa_jump_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "$do_print" "$do_exec" "${ssh_args[@]}"
+        else
+          ssherpa_jump_flow "$include_patterns" "$filter_user" "$prefilter" "$no_color" "$do_print" "$do_exec"
+        fi
+        continue
+        ;;
+      *)
+        local alias
+        alias="$token"
+        # Find entry for nicer log (best-effort)
+        local idx i user host port
+        idx=-1
+        for i in "${!NAMES[@]}"; do
+          if [[ "${NAMES[$i]}" == "$alias" ]]; then idx=$i; break; fi
+        done
+        if [[ $idx -ge 0 ]]; then
+          user="${USERS[$idx]}"; host="${HOSTS[$idx]}"; port="${PORTS[$idx]}"
+        fi
+        local disp=""; [[ -n "$user" ]] && disp+="$user@"; disp+="$host"; [[ -n "$port" ]] && disp+=":$port"
+        echo "[selected] $alias → ${disp:-$alias}"
+        if [[ $do_print -eq 1 ]]; then
+          echo "[print] $SSHERPA_SSH_CMD_STR $alias${ssh_args:+ }${ssh_args[*]:-}"; exit 0
+        fi
+        if [[ $do_exec -eq 1 ]]; then
+          echo "[exec] $SSHERPA_SSH_CMD_STR $alias${ssh_args:+ }${ssh_args[*]:-}"
+          if (( ${#ssh_args[@]} )); then
+            ssherpa_run_ssh "$alias" "${ssh_args[@]}"
+          else
+            ssherpa_run_ssh "$alias"
+          fi
+          exit $?
+        fi
+        ;;
+    esac
+  done
 }
 
 main "$@"
