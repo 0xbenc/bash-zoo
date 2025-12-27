@@ -58,3 +58,4 @@ elif [ -r /dev/tty ]; then
 else
   (cd "${repo_dir}" && exec "${BASH}" ./install.sh "$@")
 fi
+

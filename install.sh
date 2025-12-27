@@ -542,19 +542,19 @@ add_or_update_alias() {
     local target="$2"
     local rc_file="$3"
     local alias_line
-    alias_line="alias $name=\"$target\""
+    alias_line="alias $name=\"$target\"  # bash-zoo"
 
-    touch "$rc_file"
+    touch "$rc_file" 2>/dev/null || return 1
     if grep -qE "^alias[[:space:]]+$name=" "$rc_file"; then
         # Replace existing alias line
         if sed --version >/dev/null 2>&1; then
-            sed -i -E "s|^alias[[:space:]]+$name=.*|$alias_line|" "$rc_file"
+            sed -i -E "s|^alias[[:space:]]+$name=.*|$alias_line|" "$rc_file" || return 1
         else
             # macOS/BSD sed
-            sed -i '' -E "s|^alias[[:space:]]+$name=.*|$alias_line|" "$rc_file"
+            sed -i '' -E "s|^alias[[:space:]]+$name=.*|$alias_line|" "$rc_file" || return 1
         fi
     else
-        echo "$alias_line" >> "$rc_file"
+        echo "$alias_line" >> "$rc_file" 2>/dev/null || return 1
     fi
 }
 
@@ -657,16 +657,43 @@ add_path_line() {
     local rc_file="$1" dir="$2"
     local line
     line="export PATH=\"$dir:\$PATH\"  # bash-zoo"
-    touch "$rc_file"
+    touch "$rc_file" 2>/dev/null || return 1
     if grep -qE "(^|:)${dir//\//\/}(:|\")" <<<":$PATH:"; then
         return 0
     fi
     if ! grep -q "bash-zoo" "$rc_file" 2>/dev/null; then
-        echo "$line" >> "$rc_file"
+        echo "$line" >> "$rc_file" 2>/dev/null || return 1
         return 0
     fi
     # If a previous bash-zoo PATH line exists but without this dir, append a fresh one
-    echo "$line" >> "$rc_file"
+    echo "$line" >> "$rc_file" 2>/dev/null || return 1
+}
+
+FALLBACK_BIN_DIR="$HOME/.bash-zoo-binaries"
+
+remove_fallback_install_artifacts() {
+    local rc
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+        [[ -f "$rc" ]] || continue
+        # Remove any lines that reference the fallback binaries directory (old or new installs).
+        if sed --version >/dev/null 2>&1; then
+            sed -i -E "/\\.bash-zoo-binaries/d" "$rc" || true
+        else
+            sed -i '' -E "/\\.bash-zoo-binaries/d" "$rc" || true
+        fi
+    done
+
+    if [[ -d "$FALLBACK_BIN_DIR" && "$FALLBACK_BIN_DIR" == "$HOME/.bash-zoo-binaries" ]]; then
+        rm -rf "$FALLBACK_BIN_DIR" 2>/dev/null || true
+    fi
+}
+
+rollback_bin_install() {
+    local dir="$1"; shift
+    local name
+    for name in "$@"; do
+        rm -f "$dir/$name" 2>/dev/null || true
+    done
 }
 
  
@@ -764,53 +791,117 @@ fi
 installed_to_bin=()
 installed_as_alias=()
 
-    if ensure_dir "$target_dir" && is_writable_dir "$target_dir"; then
-        # Install selected tools (if any)
-        for script in "${selected_scripts[@]:-}"; do
+bin_install_failed=0
+bin_fail_details=()
+
+if ! ensure_dir "$target_dir"; then
+    bin_install_failed=1
+    bin_fail_details+=("could not create $target_dir")
+elif ! is_writable_dir "$target_dir"; then
+    bin_install_failed=1
+    bin_fail_details+=("target dir not writable: $target_dir")
+else
+    # Install selected tools
+    for script in "${selected_scripts[@]:-}"; do
         src="$PWD/$SCRIPTS_DIR/$script.sh"
         if install_file "$src" "$target_dir" "$script"; then
             installed_to_bin+=("$script")
         else
-            add_or_update_alias "$script" "$src" "$RC_FILE"
-            installed_as_alias+=("$script")
+            bin_install_failed=1
+            bin_fail_details+=("failed to copy $script into $target_dir")
         fi
     done
 
-    # Always install meta CLI
+    # Always install meta CLI (required)
     if install_bash_zoo "$target_dir"; then
         installed_to_bin+=("bash-zoo")
     else
-        echo "Warning: failed to install bash-zoo CLI to $target_dir" >&2
+        bin_install_failed=1
+        bin_fail_details+=("failed to install bash-zoo into $target_dir")
     fi
-
-    #
-else
-    echo "Note: Unable to write to $target_dir; falling back to aliases in $RC_FILE"
-    for script in "${selected_scripts[@]:-}"; do
-        add_or_update_alias "$script" "$PWD/$SCRIPTS_DIR/$script.sh" "$RC_FILE"
-        installed_as_alias+=("$script")
-    done
-    # Try to install bash-zoo even if target_dir initially unwritable (mkdir -p might fix)
-    if ensure_dir "$target_dir" && is_writable_dir "$target_dir"; then
-        if install_bash_zoo "$target_dir"; then
-            installed_to_bin+=("bash-zoo")
-        fi
-    else
-        echo "Warning: could not install bash-zoo binary; alias fallback would require repo — skipped" >&2
-    fi
-
-    #
 fi
 
-# Ensure PATH if we installed any into bin
-if [[ ${#installed_to_bin[@]} -gt 0 ]]; then
+# Ensure PATH if we installed anything into bin (required for a "good" install)
+if [[ $bin_install_failed -eq 0 && ${#installed_to_bin[@]} -gt 0 ]]; then
     if path_has_dir "$target_dir"; then
         echo "PATH already includes $target_dir"
     else
         echo "Adding $target_dir to PATH in $RC_FILE ..."
-        add_path_line "$RC_FILE" "$target_dir"
-        echo "Added."
+        if add_path_line "$RC_FILE" "$target_dir"; then
+            echo "Added."
+        else
+            bin_install_failed=1
+            bin_fail_details+=("failed to write PATH update to $RC_FILE")
+        fi
     fi
+fi
+
+if [[ $bin_install_failed -ne 0 ]]; then
+    if [[ ${#installed_to_bin[@]} -gt 0 ]]; then
+        rollback_bin_install "$target_dir" "${installed_to_bin[@]}"
+        installed_to_bin=()
+    fi
+
+    echo >&2
+    echo "Error: installation to $target_dir failed." >&2
+    echo "Details:" >&2
+    for __d in "${bin_fail_details[@]:-}"; do
+        echo "  - $__d" >&2
+    done
+    echo >&2
+    echo "Bash Zoo will not write repo- or temp-path aliases into your RC file." >&2
+    echo "Fix permissions/PATH and re-run, or confirm a fallback install that:" >&2
+    echo "  - copies launchers into: $FALLBACK_BIN_DIR" >&2
+    echo "  - writes aliases into:  $RC_FILE" >&2
+    echo >&2
+
+    if [[ ! -t 1 ]]; then
+        echo "No TTY available for confirmation prompt. Aborting." >&2
+        exit 1
+    fi
+
+    if ! gum confirm "Proceed with fallback install using $FALLBACK_BIN_DIR + aliases in $RC_FILE?"; then
+        echo "Aborted." >&2
+        exit 1
+    fi
+
+    # Fallback install: stable home directory + aliases
+    if ! ensure_dir "$FALLBACK_BIN_DIR" || ! is_writable_dir "$FALLBACK_BIN_DIR"; then
+        echo "Error: fallback directory is not writable: $FALLBACK_BIN_DIR" >&2
+        exit 1
+    fi
+
+    installed_as_alias=()
+    installed_fallback_bins=()
+    for script in "${selected_scripts[@]:-}"; do
+        src="$PWD/$SCRIPTS_DIR/$script.sh"
+        if install_file "$src" "$FALLBACK_BIN_DIR" "$script"; then
+            installed_fallback_bins+=("$script")
+            if add_or_update_alias "$script" "$FALLBACK_BIN_DIR/$script" "$RC_FILE"; then
+                installed_as_alias+=("$script")
+            else
+                echo "Error: failed to write alias for $script to $RC_FILE" >&2
+                exit 1
+            fi
+        else
+            echo "Error: failed to copy $script into $FALLBACK_BIN_DIR" >&2
+            exit 1
+        fi
+    done
+
+    if install_bash_zoo "$FALLBACK_BIN_DIR"; then
+        installed_fallback_bins+=("bash-zoo")
+        if ! add_or_update_alias "bash-zoo" "$FALLBACK_BIN_DIR/bash-zoo" "$RC_FILE"; then
+            echo "Error: failed to write alias for bash-zoo to $RC_FILE" >&2
+            exit 1
+        fi
+    else
+        echo "Error: failed to install bash-zoo into $FALLBACK_BIN_DIR" >&2
+        exit 1
+    fi
+else
+    # Successful bin install: remove any previous fallback artifacts.
+    remove_fallback_install_artifacts
 fi
 
  

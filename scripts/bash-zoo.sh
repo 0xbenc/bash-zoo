@@ -583,6 +583,20 @@ known_tools() {
     zapper
 }
 
+is_zoo_command_name() {
+  local name="$1" t
+  if [[ "$name" == "bash-zoo" ]]; then
+    return 0
+  fi
+  while IFS= read -r t; do
+    [[ -z "${t:-}" ]] && continue
+    if [[ "$name" == "$t" ]]; then
+      return 0
+    fi
+  done < <(known_tools)
+  return 1
+}
+
 discover_installed_tools() {
   # Discover previously installed tool names by checking bins and rc aliases.
   local target1="$HOME/.local/bin" target2="$HOME/bin"
@@ -609,30 +623,56 @@ discover_installed_tools() {
 }
 
 print_version() {
+  local label
+  label=$(get_version_label)
+  printf 'version: %s\n' "${label:-unknown}"
+}
+
+get_version_label() {
   local label=""
   # Prefer dev labels embedded into the script (e.g., "Local - ...").
   if [[ "${BASH_ZOO_VERSION:-}" == Local\ -\ * ]]; then
     label="$BASH_ZOO_VERSION"
-  else
-    # Otherwise prefer installed metadata commit; fall back to repo commit if running from source; else unknown.
-    local commit="unknown" short="unknown"
-    read_installed_metadata
-    if [[ -n "${INST_COMMIT:-}" && "${INST_COMMIT:-}" != "unknown" ]]; then
-      commit="$INST_COMMIT"
-    else
-      # Try to derive from the script location if it's inside a git repo (dev use)
-      local self_dir
-      self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)
-      if [[ -n "$self_dir" ]] && git -C "$self_dir" rev-parse --git-dir >/dev/null 2>&1; then
-        commit=$(git -C "$self_dir" rev-parse --verify HEAD 2>/dev/null || echo "unknown")
-      fi
-    fi
-    if [[ "$commit" != "unknown" ]]; then
-      short="${commit:0:7}"
-    fi
-    label="$short"
+    printf '%s\n' "$label"
+    return 0
   fi
-  printf 'version: %s\n' "${label:-unknown}"
+
+  # Otherwise prefer installed metadata commit; fall back to repo commit if running from source; else unknown.
+  local commit="unknown" short="unknown"
+  read_installed_metadata
+  if [[ -n "${INST_COMMIT:-}" && "${INST_COMMIT:-}" != "unknown" ]]; then
+    commit="$INST_COMMIT"
+  else
+    # Try to derive from the script location if it's inside a git repo (dev use)
+    local self_dir
+    self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)
+    if [[ -n "$self_dir" ]] && git -C "$self_dir" rev-parse --git-dir >/dev/null 2>&1; then
+      commit=$(git -C "$self_dir" rev-parse --verify HEAD 2>/dev/null || echo "unknown")
+    fi
+  fi
+  if [[ "$commit" != "unknown" ]]; then
+    short="${commit:0:7}"
+  fi
+  label="$short"
+  printf '%s\n' "${label:-unknown}"
+}
+
+resolve_installation_path() {
+  local src dir base
+  src="${BASH_SOURCE[0]}"
+  dir=$(cd "$(dirname "$src")" 2>/dev/null && pwd -P) || return 1
+  base=$(basename "$src")
+  printf '%s\n' "$dir/$base"
+}
+
+print_default() {
+  local label installation
+  label=$(get_version_label)
+  installation=$(resolve_installation_path 2>/dev/null || true)
+  if [[ -z "${installation:-}" ]]; then
+    installation="unknown"
+  fi
+  printf 'version: %s | instalation: %s\n' "${label:-unknown}" "$installation"
 }
 
 list_cmd() {
@@ -725,10 +765,23 @@ uninstall_cmd() {
       if [[ "$line" =~ ^alias[[:space:]]+([a-zA-Z0-9_-]+)=[\"\']([^\"\']+)[\"\'] ]]; then
         alias_name="${BASH_REMATCH[1]}"
         target="${BASH_REMATCH[2]}"
+        if ! is_zoo_command_name "$alias_name"; then
+          continue
+        fi
+
         if [[ "$target" =~ scripts/([a-zA-Z0-9_-]+)\.sh$ ]]; then
           script="${BASH_REMATCH[1]}"
           label="alias: $alias_name -> $script (${rc##*/})"
-          push_item "$label" alias "$rc $alias_name $script"
+          push_item "$label" alias "$rc $alias_name $target"
+          continue
+        fi
+
+        # Fallback install dir used by install.sh
+        if [[ "$target" =~ \.bash-zoo-binaries/([a-zA-Z0-9_-]+)$ ]]; then
+          script="${BASH_REMATCH[1]}"
+          label="alias: $alias_name -> $script (fallback; ${rc##*/})"
+          push_item "$label" alias "$rc $alias_name $target"
+          continue
         fi
       fi
     done < "$rc"
@@ -782,7 +835,13 @@ uninstall_cmd() {
     if [[ "$__s" == "all" ]]; then selected_ids=("${ids[@]}"); break; fi
   done
 
-  local removed=0 idx kind payload rcfile aname sname path pat esc rest __sel
+  # Escape helper for sed ERE patterns.
+  escape_ere() {
+    # Escapes ERE metacharacters: ] [ \ . ^ $ * + ? ( ) { } |
+    printf '%s' "$1" | sed -e 's/[][\\.^$*+?(){}|]/\\&/g'
+  }
+
+  local removed=0 idx kind payload rcfile aname target path pat esc rest __sel
   for __sel in "${selected_ids[@]}"; do
     if [[ "$__sel" == all ]]; then continue; fi
     if [[ "$__sel" == meta-cli ]]; then continue; fi
@@ -793,12 +852,12 @@ uninstall_cmd() {
       path="$payload"
       if [[ -e "$path" ]]; then rm -f "$path" && ((removed+=1)); fi
     else
-      # payload: rcfile name script
+      # payload: rcfile alias_name target
       rcfile=${payload%% *}
       rest=${payload#* }
       aname=${rest%% *}
-      sname=${rest##* }
-      pat="^alias[[:space:]]+${aname}=[\"\'][^\"\']*scripts/${sname}\\.sh[\"\']"
+      target=${rest#* }
+      pat="^alias[[:space:]]+${aname}=[\"\']$(escape_ere "$target")[\"\'].*$"
       esc=$(printf '%s' "$pat" | sed 's/\//\\\//g')
       if sed --version >/dev/null 2>&1; then
         sed -i -E "/$esc/d" "$rcfile" && ((removed+=1))
@@ -919,7 +978,11 @@ update_passwords_cmd() {
 }
 
 main() {
-  local cmd="${1:-version}"
+  local cmd="${1:-}"
+  if [[ -z "$cmd" ]]; then
+    print_default
+    return 0
+  fi
   case "$cmd" in
     help|-h|--help) print_usage ;;
     version)        print_version ;;

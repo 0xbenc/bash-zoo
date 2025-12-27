@@ -24,7 +24,7 @@ curl -fsSL https://bash.occ.farm | bash
 or
 
 ```shell
-curl -fsSL https://raw.githubusercontent.com/0xbenc/bash-zoo/HEAD/install-remote.sh | bash
+curl -fsSL https://raw.githubusercontent.com/0xbenc/bash-zoo/HEAD/remote-install.sh | bash
 ```
 or
 

@@ -12,7 +12,7 @@ The goal is to speed up contributions, debugging, and safe automation by conveyi
 - No Bash 4-only features on macOS (no associative arrays, no `mapfile`). Indexed arrays are allowed.
 - Atomic file updates and safe directory swaps are first-class design constraints.
 - UX is excellent: clear status lines and summaries; `gum` is a core prerequisite used for interactive flows and `figlet` powers large-code TOTP displays. The installer does not install prerequisites; ensure Homebrew, `gum`, and `figlet` are installed before running it.
-- The meta CLI is always installed and self-updatable. Tools can be installed as binaries or as aliases in the user’s RC file.
+- The meta CLI is always installed and self-updatable. Default installs are binaries; an explicit, confirmed fallback mode can install stable home-directory launchers and RC-file aliases.
 
 ---
 
@@ -76,22 +76,24 @@ Reading is performed with portable `sed`/string ops (no JSON parser dependency).
 High-level flow:
 
 Bootstrap:
-- `install-remote.sh` is a POSIX `sh` wrapper for `curl ... | sh`: it clones the repo to a temp dir and runs `bash ./install.sh` (redirecting stdin from `/dev/tty` when piped so interactive prompts still work).
+- `remote-install.sh` is a POSIX `sh` wrapper for `curl ... | sh`: it clones the repo to a temp dir and runs `bash ./install.sh` (redirecting stdin from `/dev/tty` when piped so interactive prompts still work).
 
 1) Detect OS: macOS vs Debian-like Linux; bail out on unsupported.
 2) Option parsing: `--all`, `--exp`, `--names <csv>` allow non-interactive flows and experimental tool inclusion.
 3) Load registry `setup/registry.tsv` and filter tools by OS (and stability unless `--exp`).
 4) Prerequisites: `brew`, `gum`, and `figlet` must be installed by the user prior to running the installer. The installer checks and exits with instructions if missing.
 5) For each selected tool:
-   - Try to install a binary into `$(resolve_target_dir)`.
-   - If the target dir is not writable, or copy fails: fall back to an alias in the user RC file (`~/.bashrc` or `~/.zshrc`).
+   - Install a binary into `$(resolve_target_dir)` (all-or-nothing).
+   - If the target dir is not writable, a copy fails, or `PATH` can’t be added to the user’s RC file, the installer aborts loudly.
+   - Optional fallback (requires interactive confirmation via `gum confirm`): copy launchers into `~/.bash-zoo-binaries` and write aliases in the user RC file pointing to that directory.
 6) Install the meta CLI unconditionally:
    - Render `scripts/bash-zoo.sh` by substituting `@VERSION@` and `@REPO_URL@` to embed `BASH_ZOO_VERSION` and `BASH_ZOO_REPO_URL`. If no git remote is available, embed the canonical default `https://github.com/0xbenc/bash-zoo.git`.
 7) Ensure `PATH` contains the target bin directory (append a `# bash-zoo` tagged line in the RC file when needed).
 8) Write `installed.json` with `version`, `commit`, `repo_url`, and the `installed` union.
 
 Idempotency:
-- Re-running the installer is safe and only updates what’s necessary (copy-on-change, alias update/replace, path line present check).
+- Re-running the installer is safe and only updates what’s necessary (copy-on-change, path line present check).
+- If a normal bin install succeeds, the installer removes any prior `~/.bash-zoo-binaries` directory and any RC-file references to it.
 - Grouping: `zapp` and `zapper` are grouped as “zapps” in the interactive UI to simplify selection.
 
 Portability constraints:
