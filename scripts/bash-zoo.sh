@@ -445,6 +445,9 @@ update_zoo_cmd() {
   done < <(discover_installed_tools)
   local m
   for m in "${INST_LIST[@]:-}"; do
+    if ! is_current_tool_name "$m"; then
+      continue
+    fi
     case ",$seen," in *",$m,"*) ;; *) names+=("$m"); seen="$seen,$m" ;; esac
   done
 
@@ -568,19 +571,41 @@ ensure_gum() {
   command -v gum >/dev/null 2>&1
 }
 
-known_tools() {
-  # Keep in sync with installable scripts (plus retired tools for cleanup)
+current_tools() {
+  # Keep in sync with installable scripts.
   printf '%s\n' \
     forgit \
     gpgobble \
     hostshelper \
     killport \
-    mfa \
     passage \
-    ssherpa \
     uuid \
+    yeet \
     zapp \
     zapper
+}
+
+retired_tools() {
+  # Retained only so uninstall can clean up older installs.
+  printf '%s\n' \
+    mfa \
+    ssherpa
+}
+
+known_tools() {
+  current_tools
+  retired_tools
+}
+
+is_current_tool_name() {
+  local name="$1" t
+  while IFS= read -r t; do
+    [[ -z "${t:-}" ]] && continue
+    if [[ "$name" == "$t" ]]; then
+      return 0
+    fi
+  done < <(current_tools)
+  return 1
 }
 
 is_zoo_command_name() {
@@ -619,7 +644,7 @@ discover_installed_tools() {
     if [[ $any -eq 1 ]]; then
       printf '%s\n' "$name"
     fi
-  done < <(known_tools)
+  done < <(current_tools)
 }
 
 print_version() {
@@ -687,6 +712,9 @@ list_cmd() {
 
   for n in "${INST_LIST[@]:-}"; do
     if [[ -z "$n" ]]; then
+      continue
+    fi
+    if ! is_current_tool_name "$n"; then
       continue
     fi
     case ",$seen," in

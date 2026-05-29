@@ -25,7 +25,7 @@ The goal is to speed up contributions, debugging, and safe automation by conveyi
   - `uninstall [--all]` — remove installed tools/aliases (with interactive selection via `gum` unless `--all`)
   - `update passwords` — per-folder `git` pull under `~/.password-store`
   - `update zoo` — refresh installed tools and the meta CLI (self-update)
-- `scripts/*.sh` — User-facing tools (e.g., `uuid.sh`, `zapp.sh`, `zapper.sh`, `forgit.sh`, `gpgobble.sh`, `passage.sh`, `killport.sh`, `ssherpa.sh`).
+- `scripts/*.sh` — User-facing tools (e.g., `uuid.sh`, `zapp.sh`, `zapper.sh`, `forgit.sh`, `gpgobble.sh`, `passage.sh`, `killport.sh`).
 - `setup/<os>/<tool>.sh` — Per-tool setup helpers for Debian/macOS.
 - `docs/update-zoo.md` — High-level self-update design (kept aligned with the code).
 - `docs/how-it-works.md` — This document.
@@ -258,7 +258,7 @@ write_installed_metadata_update(version=src_version, commit, repo_url, names...)
 1) Create the tool script at `scripts/<name>.sh` (portable Bash, `set -euo pipefail`).
 2) Add per-OS setup helpers as needed under `setup/debian/<name>.sh` and/or `setup/macos/<name>.sh`.
 3) Register the tool in `setup/registry.tsv` with OS allowlist and description.
-4) Update `scripts/bash-zoo.sh` `known_tools()` set.
+4) Update `scripts/bash-zoo.sh` `current_tools()` set. Move removed tools to `retired_tools()` only when the meta CLI should keep uninstall cleanup support for older installs.
 5) Update README “Tools at a Glance” and “Tool Details”.
 6) Optional: if the tool has runtime assets, place them in a directory structure designed to live under `$(resolve_share_root)` and adopt a double-rename strategy for updates.
 7) Verify installation, uninstallation, and update flows:

@@ -33,6 +33,7 @@ fi
 
 SCRIPTS_DIR="$PWD/scripts"
 BIN_DIRS=("$HOME/.local/bin" "$HOME/bin")
+RETIRED_SCRIPT_NAMES=("mfa" "ssherpa")
 
 # Candidate RC files to scan (installer writes to one of these)
 RC_CANDIDATES=("$HOME/.bashrc" "$HOME/.zshrc")
@@ -173,6 +174,14 @@ for d in "${BIN_DIRS[@]}"; do
   for sfile in "$SCRIPTS_DIR"/*.sh; do
     [[ -f "$sfile" ]] || continue
     sname=$(basename "$sfile" .sh)
+    target="$d/$sname"
+    if [[ -e "$target" ]]; then
+      bin_paths+=("$target")
+      bin_scripts+=("$sname")
+      bin_dirs_for_item+=("$d")
+    fi
+  done
+  for sname in "${RETIRED_SCRIPT_NAMES[@]}"; do
     target="$d/$sname"
     if [[ -e "$target" ]]; then
       bin_paths+=("$target")
@@ -348,6 +357,11 @@ for d in "${BIN_DIRS[@]}"; do
     sname=$(basename "$sfile" .sh)
     if [[ -e "$d/$sname" ]]; then any_left=1; break; fi
   done
+  if [[ $any_left -eq 0 ]]; then
+    for sname in "${RETIRED_SCRIPT_NAMES[@]}"; do
+      if [[ -e "$d/$sname" ]]; then any_left=1; break; fi
+    done
+  fi
   if [[ $any_left -eq 1 ]]; then
     cleanup_path_lines=0
     break

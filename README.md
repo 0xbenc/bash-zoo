@@ -52,7 +52,6 @@ cd bash-zoo
 | [gpgobble](docs/gpgobble.md) | ✅ stable | Bulk‑import public keys and set ownertrust to FULL (4) for non‑local keys | macOS, Debian/Ubuntu | `gnupg` |
 | [killport](docs/killport.md) | ✅ stable | Free a TCP/UDP port with gum selection, TERM→KILL, and wait | macOS, Debian/Ubuntu | `lsof` (Linux optionally `iproute2` for `ss`) |
 | [hostshelper](docs/hostshelper.md) | ✅ stable | Save host/IP pairs + presets and write them into `/etc/hosts` | macOS, Debian/Ubuntu | none |
-| [ssherpa](docs/ssherpa.md) | ✅ stable | Alias-first SSH host picker + interactive config writer | macOS, Debian/Ubuntu | none |
 | [yeet](docs/yeet.md) | ✅ stable | Eject removable flash drives with gum multi‑select | macOS, Debian/Ubuntu | `udisks2` (Linux) |
 | [passage](docs/passage.md) | ✅ stable | Interactive GNU Pass browser with pins and MRU; jump-start filter with `passage <term>`; built‑in TOTP (MFA) helpers | macOS, Debian/Ubuntu | `pass`, `oathtool`, platform clipboard utility |
 | [uuid](docs/uuid.md) | ✅ stable | Create and copy a fresh UUID without leaving the terminal | macOS, Debian/Ubuntu | `uuidgen` (or Python 3), clipboard tool (`pbcopy`/`xclip`/`xsel`) |
@@ -128,6 +127,10 @@ Bash Zoo depends on (and is inspired by) these upstream projects:
 - [Vik Bhaduri](https://github.com/basedvik) — Contributor
 - [Ben Chapman](https://github.com/0xbenc) — Maintainer
 - [Ben Cully](https://github.com/BenCully) — Contributor
+
+## Related
+
+`ssherpa` now lives as a separate tool: https://github.com/0xbenc/ssherpa
 
 ## License
 
